@@ -4,11 +4,11 @@
 
 The full integration/failure suite passed again after security hardening on Apple Silicon/macOS 27.0. Additional AddressSanitizer checks passed for valid/invalid image decoding, dimension and pixel limits, a 100,000-frame flood, credential validation/escaping and response redaction, 20,000 deterministic malformed-input iterations, and cancellation of a queued frame while the UI is busy. Package-verifier regressions also reject checksum changes, duplicate entries, traversal, absolute paths, symlinks, unexpected files, expansion limits, and excess entry counts under Python optimization.
 
-The current app enables App Sandbox and Hardened Runtime. A local sandboxed build opened successfully and displayed a synthetic 2×2 localhost stream. Its Save dialog wrote a snapshot that exactly matched the supplied JPEG (SHA-256 `7a0817ea620dca22254a38c56df45cd4d5cadf8dbc6e6066bc495613368e0969`). The [security review](SECURITY-REVIEW.md) describes exact limits and remaining risks. The [workflow](../.github/workflows/ci.yml) is now enabled; macOS 26 CI validation remains pending until a successful run is recorded in [Actions](https://github.com/siavashHkh/a9-camera-macos/actions/workflows/ci.yml). The release's scan report records the local antivirus check of the published ZIP. Historical GUI results below apply to 0.3.1.
+The current app enables App Sandbox and Hardened Runtime. A local sandboxed build opened successfully and displayed a synthetic 2×2 localhost stream. Its Save dialog wrote a snapshot that exactly matched the supplied JPEG (SHA-256 `7a0817ea620dca22254a38c56df45cd4d5cadf8dbc6e6066bc495613368e0969`). The [security review](SECURITY-REVIEW.md) describes exact limits and remaining risks. The [first GitHub CI run](https://github.com/siavashHkh/a9-camera-macos/actions/runs/39066601959) passed the integration, failure, AddressSanitizer, and package checks on Apple Silicon/macOS 26.6.2, followed by a successful ClamAV scan with zero detections. See [CI results](https://github.com/siavashHkh/a9-camera-macos/blob/main/docs/CI-RESULTS.md) for the tested commit and CI package hash. The release's scan report records the separate local antivirus check of the published ZIP. Historical GUI results below apply to 0.3.1.
 
 ## Historical baseline: 0.3.1
 
-Test date: **2026-10-17**, Europe/Helsinki. Host: Apple Silicon, macOS 27.0 build 26A428; macOS 27 SDK. The release explicitly targets arm64 and macOS 26.0. Runtime testing on macOS 26 itself has not been performed.
+Test date: **2026-10-17**, Europe/Helsinki. Host: Apple Silicon, macOS 27.0 build 26A428; macOS 27 SDK. The release explicitly targets arm64 and macOS 26.0. At this baseline stage, runtime testing on macOS 26 itself had not yet been performed; the later 0.3.2 CI results above cover automated checks on macOS 26.6.2.
 
 ## Supplied 0.3.0 archive
 
@@ -70,7 +70,7 @@ The GUI's synthetic stream is test evidence for rendering and snapshot behavior,
 - A fresh physical A9-camera stream: the test host had no direct route to the camera hotspot during this session.
 - Bluetooth discovery, connection, notifications, and Wi-Fi provisioning against hardware.
 - Account-free setup or video streaming through a home router.
-- Other camera models/firmware and runtime behavior on macOS 26.
+- Other camera models/firmware, GUI operation on macOS 26, and runtime behavior on macOS 26.0 specifically. Automated core tests passed on macOS 26.6.2.
 - Launch of a fresh internet-downloaded copy after per-app Gatekeeper approval.
 
 The release remains an **experimental public preview**. The tests do not establish universal A9 compatibility or a complete security audit.
