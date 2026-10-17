@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>local.a9.camera</string>
+<key>CFBundleName</key><string>A9 Camera</string>
+<key>CFBundleDisplayName</key><string>A9 Camera</string>
+<key>CFBundleExecutable</key><string>A9Camera</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleVersion</key><string>4</string>
+<key>CFBundleShortVersionString</key><string>0.3.1</string>
+<key>LSMinimumSystemVersion</key><string>26.0</string>
+<key>NSHighResolutionCapable</key><true/>
+<key>NSBluetoothAlwaysUsageDescription</key><string>Find your A9 camera and send Wi-Fi settings directly to it.</string>
+<key>NSBluetoothPeripheralUsageDescription</key><string>Find and configure your A9 camera nearby.</string>
+<key>NSLocalNetworkUsageDescription</key><string>Connect directly to your camera to display its live video.</string>
+</dict></plist>

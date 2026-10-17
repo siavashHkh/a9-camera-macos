@@ -1,0 +1,37 @@
+A9 Camera for Mac — version 0.3.1 (experimental public preview)
+
+Requires Apple Silicon (M1 or later) and macOS 26 or later.
+This app is ad hoc signed and is not Apple notarized.
+
+Extract the ZIP and open A9 Camera.app. macOS may block a downloaded copy;
+approve this specific app in Privacy & Security only if you trust it.
+Bluetooth and Local Network access are used for their respective features.
+Location Services is not required.
+
+DIRECT CAMERA WI-FI
+1. Power on your camera.
+2. Use macOS Wi-Fi settings to join its hotspot (often Nax_..., A9, or V720).
+3. In Camera Wi-Fi, click I joined camera Wi-Fi — connect.
+   Default: 192.168.169.1, V720 classic, TCP port 6123.
+4. Try the other V720 protocol or a different local IP if your camera needs it.
+5. Save snapshot saves the current JPEG; Stop ends the stream.
+
+The Wi-Fi buttons open settings. They do not join a network automatically.
+Joining the camera hotspot may interrupt internet access on the Mac.
+
+TEST STATUS
+Packet parsing, both MJPEG handshakes, failure handling, timeout, cancellation,
+and the GUI are tested using simulated cameras. See TEST-RESULTS.md.
+Physical-camera streaming was not revalidated for this release.
+The supplied 0.3.0 guide reports a historical camera test on 2026-10-11;
+that report is not new test evidence for this release.
+
+LIMITS
+Home Wi-Fi provisioning and streaming through a router remain experimental.
+Some camera firmware needs vendor registration or extra local server setup.
+H.264, audio, recording, AI detection, motion alerts, and SD-card management
+are not implemented. No firmware images or firmware updater are included.
+No personal camera identity or Wi-Fi password is bundled with this release.
+
+Source, checksums, and release notes:
+https://github.com/siavashHkh/a9-camera-macos
