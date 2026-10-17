@@ -39,7 +39,7 @@ The app uses macOS App Sandbox and Hardened Runtime. Its entitlements allow outg
 
 JPEGs must be 8-bit images, no more than 4 MiB compressed, no more than 4096 pixels on either edge, and no more than 8,847,360 pixels in total. Decoding runs off the UI thread. Frame delivery keeps the newest frame and limits queued UI work. These limits may reject unusual camera formats.
 
-The [prepared GitHub Actions workflow](docs/automation/ci.yml) runs integration and AddressSanitizer checks on macOS 26, builds and verifies the sandboxed package, and scans source and ZIP with ClamAV. Automated CI is not active yet. The release notes and attached scan report record completed local checks; workflow configuration alone is not evidence of a successful run. These checks do not guarantee safety or replace Apple notarization.
+The [GitHub Actions workflow](.github/workflows/ci.yml) runs integration and AddressSanitizer checks on macOS 26, builds and verifies the sandboxed package, and scans source and ZIP with ClamAV. It runs for main-branch pushes and pull requests, and can be started manually from [Actions](https://github.com/siavashHkh/a9-camera-macos/actions/workflows/ci.yml). Check the run results for completed CI validation; workflow configuration alone is not evidence of a successful run. The published 0.3.2 ZIP was built and checked locally, with its exact hash recorded in the release's attached scan report. These checks do not guarantee safety or replace Apple notarization.
 
 ## Limits
 
