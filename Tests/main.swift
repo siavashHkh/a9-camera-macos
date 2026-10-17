@@ -47,13 +47,13 @@ check(jpegParser.feed(Data([0, 0xff])).isEmpty, "split JPEG start")
 check(jpegParser.feed(Data([0xd8, 1, 0xff])).isEmpty, "split JPEG end")
 check(jpegParser.feed(Data([0xd9])) == [Data([0xff, 0xd8, 1, 0xff, 0xd9])], "JPEG assembly")
 let tinyJPEG = Data([0xff, 0xd8, 1, 0xff, 0xd9])
-check(jpegParser.feed(tinyJPEG + tinyJPEG) == [tinyJPEG, tinyJPEG], "multiple JPEG frames")
+check(jpegParser.feed(tinyJPEG + tinyJPEG) == [tinyJPEG], "coalesced JPEG frames keep the newest")
 check(jpegParser.feed(Data([0xff, 0xd8]) + Data(repeating: 0, count: CameraWire.maxPayload)).isEmpty, "oversized JPEG discarded")
 check(jpegParser.feed(tinyJPEG) == [tinyJPEG], "JPEG recovery after oversized frame")
 for address in ["127.0.0.1", "192.168.169.1", "10.0.0.1", "172.16.0.1", "172.31.255.255", "169.254.1.2"] {
     check(CameraVideo.validLocalAddress(address), "local address rejected")
 }
-for address in ["8.8.8.8", "", "192.168..1", "256.1.1.1", "camera.example", "172.15.0.1", "172.32.0.1", "::1", "192.168.1.1:6123", "192.168.1.1\n", "١٩٢.١٦٨.١.١", "-1.0.0.1"] {
+for address in ["8.8.8.8", "", "192.168..1", "256.1.1.1", "camera.example", "172.15.0.1", "172.32.0.1", "::1", "192.168.1.1:6123", "192.168.1.1\n", "١٩٢.١٦٨.١.١", "-1.0.0.1", "010.0.0.1", "0172.16.0.1", "192.168.001.1"] {
     check(!CameraVideo.validLocalAddress(address), "invalid/public address accepted")
 }
 print("PASS: packet/JPEG parsing and local-address validation")
@@ -138,8 +138,8 @@ let video = CameraVideo()
 var phase = 0
 video.onStatus = { print("CLIENT: \($0)") }
 video.onStopped = { check(false, "video stopped before receiving a test frame") }
-video.onFrame = { data in
-    check(data == testJPEG && NSImage(data: data) != nil, "invalid reconstructed JPEG")
+video.onFrame = { frame in
+    check(frame.jpeg == testJPEG && frame.image.width == 2 && frame.image.height == 2, "invalid reconstructed JPEG")
     print("PASS: \(phase == 0 ? "classic" : "modern") loopback handshake and decoded JPEG")
     video.stop()
     if phase == 0 {

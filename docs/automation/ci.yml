@@ -1,0 +1,70 @@
+name: Build and security checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    name: macOS 26 tests and sandboxed package
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        run: |
+          sw_vers
+          swiftc --version
+      - name: Integration and AddressSanitizer security checks
+        run: bash test.sh
+      - name: Build and verify sandboxed archive
+        run: |
+          bash scripts/package.sh
+          python3 scripts/verify_release.py
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: a9-camera-${{ github.sha }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+  malware-scan:
+    name: ClamAV scan of the packaged app
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: a9-camera-${{ github.sha }}
+          path: scan
+      - name: Install scanner and update official signatures
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clamav clamav-freshclam
+          sudo systemctl stop clamav-freshclam || true
+          sudo freshclam --stdout
+      - name: Check checksum and scan source and release archive
+        run: |
+          (cd scan && sha256sum -c SHA256SUMS.txt)
+          clamscan --version | tee clamav-report.txt
+          clamscan --recursive --infected --alert-exceeds-max=yes --max-filesize=32M --max-scansize=64M scan Sources Tests scripts docs Info.plist Entitlements.plist build.sh test.sh README.md | tee -a clamav-report.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: clamav-report-${{ github.sha }}
+          path: clamav-report.txt
+          if-no-files-found: warn
+          retention-days: 30

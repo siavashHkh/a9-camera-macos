@@ -1,7 +1,8 @@
-A9 Camera for Mac — version 0.3.1 (experimental public preview)
+A9 Camera for Mac — version 0.3.2 (experimental public preview)
 
 Requires Apple Silicon (M1 or later) and macOS 26 or later.
 This app is ad hoc signed and is not Apple notarized.
+It enables macOS App Sandbox and Hardened Runtime.
 
 Extract the ZIP and open A9 Camera.app. macOS may block a downloaded copy;
 approve this specific app in Privacy & Security only if you trust it.
@@ -32,6 +33,12 @@ Some camera firmware needs vendor registration or extra local server setup.
 H.264, audio, recording, AI detection, motion alerts, and SD-card management
 are not implemented. No firmware images or firmware updater are included.
 No personal camera identity or Wi-Fi password is bundled with this release.
+
+SECURITY
+The camera TCP protocol is unencrypted and does not verify camera identity.
+Bluetooth link encryption has not been verified. Use a dedicated camera
+network and only send credentials to a device you recognize.
+See SECURITY-REVIEW.md for the hardening changes and remaining risks.
 
 Source, checksums, and release notes:
 https://github.com/siavashHkh/a9-camera-macos

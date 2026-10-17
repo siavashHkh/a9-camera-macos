@@ -1,4 +1,12 @@
-# A9 Camera 0.3.1 validation
+# A9 Camera validation
+
+## Current release: 0.3.2
+
+The full integration/failure suite passed again after security hardening on Apple Silicon/macOS 27.0. Additional AddressSanitizer checks passed for valid/invalid image decoding, dimension and pixel limits, a 100,000-frame flood, credential validation/escaping and response redaction, 20,000 deterministic malformed-input iterations, and cancellation of a queued frame while the UI is busy. Package-verifier regressions also reject checksum changes, duplicate entries, traversal, absolute paths, symlinks, unexpected files, expansion limits, and excess entry counts under Python optimization.
+
+The current app enables App Sandbox and Hardened Runtime. A local sandboxed build opened successfully and displayed a synthetic 2×2 localhost stream. Its Save dialog wrote a snapshot that exactly matched the supplied JPEG (SHA-256 `7a0817ea620dca22254a38c56df45cd4d5cadf8dbc6e6066bc495613368e0969`). The [security review](SECURITY-REVIEW.md) describes exact limits and remaining risks. The [prepared workflow](automation/ci.yml) has not run on GitHub; macOS 26 validation remains outstanding until it does. The release's scan report records any completed antivirus check. Historical GUI results below apply to 0.3.1.
+
+## Historical baseline: 0.3.1
 
 Test date: **2026-10-17**, Europe/Helsinki. Host: Apple Silicon, macOS 27.0 build 26A428; macOS 27 SDK. The release explicitly targets arm64 and macOS 26.0. Runtime testing on macOS 26 itself has not been performed.
 

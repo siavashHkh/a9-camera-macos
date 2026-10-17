@@ -10,7 +10,7 @@ struct CameraDevice {
 final class CameraBluetooth: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     var onDevices: (([CameraDevice]) -> Void)?
     var onStatus: ((String) -> Void)?
-    var onReady: ((Bool) -> Void)?
+    var onReady: ((UUID?) -> Void)?
     var onProvisioned: (() -> Void)?
     private let queue = DispatchQueue(label: "local.a9.bluetooth")
     private var central: CBCentralManager!
@@ -23,19 +23,25 @@ final class CameraBluetooth: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     private var session = UUID()
     private var awaitingSetup = false
     private var ready = false
+    private var setupAcknowledged = false
 
-    override init() {
-        super.init()
-        central = CBCentralManager(delegate: self, queue: queue)
-    }
     private func status(_ text: String) { DispatchQueue.main.async { self.onStatus?(text) } }
     private func setReady(_ value: Bool) {
         ready = value
-        DispatchQueue.main.async { self.onReady?(value) }
+        let deviceID = value ? selected?.identifier : nil
+        DispatchQueue.main.async { self.onReady?(deviceID) }
     }
     func scan() {
         queue.async {
+            guard !self.awaitingSetup else { self.status("Finish the current Wi-Fi setup before scanning again."); return }
             self.wantsScan = true
+            if self.central == nil {
+                self.central = CBCentralManager(delegate: self, queue: self.queue)
+                return
+            }
+            if let old = self.selected { self.central.cancelPeripheralConnection(old) }
+            self.selected = nil; self.writeCharacteristic = nil; self.notifyCharacteristic = nil
+            self.setReady(false)
             if self.central.state == .poweredOn { self.beginScan() }
             else { self.status("Waiting for Bluetooth. Allow access if macOS asks.") }
         }
@@ -52,7 +58,7 @@ final class CameraBluetooth: NSObject, CBCentralManagerDelegate, CBPeripheralDel
         let initial = Array(devices.values)
         DispatchQueue.main.async { self.onDevices?(initial) }
         status("Searching nearby for A9 cameras…")
-        central.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: true])
+        central.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
         let scanSession = UUID(); session = scanSession
         queue.asyncAfter(deadline: .now() + 15) {
             guard self.session == scanSession else { return }
@@ -62,16 +68,16 @@ final class CameraBluetooth: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     }
     func connect(id: UUID) {
         queue.async {
-            guard let peripheral = self.peripherals[id] else { self.status("Scan again to find this camera."); return }
-            self.central.stopScan(); self.wantsScan = false
-            if let old = self.selected { self.central.cancelPeripheralConnection(old) }
+            guard let central = self.central, let peripheral = self.peripherals[id] else { self.status("Scan again to find this camera."); return }
+            central.stopScan(); self.wantsScan = false
+            if let old = self.selected { central.cancelPeripheralConnection(old) }
             self.session = UUID(); let connectionSession = self.session
             self.selected = peripheral
             self.writeCharacteristic = nil; self.notifyCharacteristic = nil
-            self.awaitingSetup = false; self.setReady(false)
+            self.awaitingSetup = false; self.setupAcknowledged = false; self.setReady(false)
             peripheral.delegate = self
             self.status("Connecting to \(peripheral.name ?? "A9")…")
-            self.central.connect(peripheral)
+            central.connect(peripheral)
             self.queue.asyncAfter(deadline: .now() + 45) {
                 guard self.session == connectionSession, !self.ready,
                       self.notifyCharacteristic?.isNotifying != true else { return }
@@ -80,18 +86,21 @@ final class CameraBluetooth: NSObject, CBCentralManagerDelegate, CBPeripheralDel
             }
         }
     }
-    func configureWiFi(ssid: String, password: String) {
+    func configureWiFi(ssid: String, password: String, expectedDeviceID: UUID) {
         queue.async {
-            guard self.ready, let p = self.selected, let write = self.writeCharacteristic else {
+            guard self.ready, let p = self.selected, p.identifier == expectedDeviceID,
+                  p.state == .connected, let write = self.writeCharacteristic else {
                 self.status("Connect Bluetooth first."); return
             }
             // V720 setup JSON. An empty user ID deliberately avoids a vendor account.
             // Whether account-free provisioning is accepted depends on firmware.
-            guard let data = try? JSONSerialization.data(withJSONObject: ["s": ssid, "p": password, "u": ""], options: [.sortedKeys]) else { return }
+            guard let data = try? CameraSetup.payload(ssid: ssid, password: password) else {
+                self.status("Invalid Wi-Fi details."); return
+            }
             guard data.count <= p.maximumWriteValueLength(for: .withResponse) else {
                 self.status("These Wi-Fi details exceed the camera’s Bluetooth message size."); return
             }
-            self.awaitingSetup = true
+            self.awaitingSetup = true; self.setupAcknowledged = false
             self.setReady(false)
             self.status("Sending Wi-Fi details directly to the camera…")
             p.writeValue(data, for: write, type: .withResponse)
@@ -106,8 +115,8 @@ final class CameraBluetooth: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     }
     func disconnect() {
         queue.async {
-            self.session = UUID(); self.central.stopScan(); self.wantsScan = false
-            if let p = self.selected { self.central.cancelPeripheralConnection(p) }
+            self.session = UUID(); self.central?.stopScan(); self.wantsScan = false
+            if let p = self.selected { self.central?.cancelPeripheralConnection(p) }
             self.selected = nil; self.setReady(false)
         }
     }
@@ -123,6 +132,7 @@ final class CameraBluetooth: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String: Any], rssi RSSI: NSNumber) {
         let name = advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? peripheral.name ?? ""
         guard name.uppercased().contains("A9") || name.lowercased().hasPrefix("nax") || name.uppercased().contains("V720") else { return }
+        guard devices[peripheral.identifier] != nil || devices.count < 128 else { return }
         peripherals[peripheral.identifier] = peripheral
         devices[peripheral.identifier] = CameraDevice(id: peripheral.identifier, name: name, signal: RSSI.intValue)
         let list = devices.values.sorted { $0.id.uuidString < $1.id.uuidString }
@@ -141,7 +151,8 @@ final class CameraBluetooth: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         guard peripheral === selected else { return }
         setReady(false)
-        status(awaitingSetup ? "Camera disconnected during setup. Checking for confirmation…" : "Bluetooth disconnected. Scan to reconnect.")
+        if setupAcknowledged { status("Wi-Fi setup acknowledged; Bluetooth disconnected. Locate the camera’s IP to view video.") }
+        else { status(awaitingSetup ? "Camera disconnected during setup. Checking for confirmation…" : "Bluetooth disconnected. Scan to reconnect.") }
     }
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard peripheral === selected else { return }
@@ -158,23 +169,25 @@ final class CameraBluetooth: NSObject, CBCentralManagerDelegate, CBPeripheralDel
         peripheral.setNotifyValue(true, for: notify)
     }
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
-        guard peripheral === selected else { return }
+        guard peripheral === selected, characteristic === notifyCharacteristic else { return }
         if error == nil && characteristic.isNotifying {
             setReady(true); status("A9 connected • V720 Bluetooth setup supported")
         } else { status("Camera notifications could not be enabled. Reconnect and try again.") }
     }
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
-        guard peripheral === selected else { return }
+        guard peripheral === selected, characteristic === writeCharacteristic, awaitingSetup else { return }
         if let error = error {
             awaitingSetup = false; setReady(true); status("Setup write failed: \(error.localizedDescription)")
         } else { status("Wi-Fi details delivered. Waiting for the camera’s confirmation…") }
     }
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
-        guard peripheral === selected, awaitingSetup, error == nil, let data = characteristic.value else { return }
+        guard peripheral === selected, characteristic === notifyCharacteristic,
+              awaitingSetup, error == nil, let data = characteristic.value else { return }
         if data == Data([0]) {
-            awaitingSetup = false; status("Camera acknowledged Wi-Fi setup. Locate its IP address to view video.")
+            awaitingSetup = false; setupAcknowledged = true; setReady(false)
+            status(CameraSetup.responseStatus(data))
             DispatchQueue.main.async { self.onProvisioned?() }
             central.cancelPeripheralConnection(peripheral)
-        } else { status("Camera setup response: \(data.map { String(format: "%02X", $0) }.joined(separator: " "))") }
+        } else { status(CameraSetup.responseStatus(data)) }
     }
 }

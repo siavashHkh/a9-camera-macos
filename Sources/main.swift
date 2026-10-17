@@ -40,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var lastJPEG: Data?
     var frameCount = 0
     var isViewing = false
+    var connectedDeviceID: UUID?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -53,7 +54,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         snapshotButton.isEnabled = false; stopButton.isEnabled = false
         bluetooth = CameraBluetooth()
         bluetooth.onStatus = { [weak self] text in self?.bluetoothStatus.stringValue = text }
-        bluetooth.onReady = { [weak self] ready in self?.setupButton.isEnabled = ready }
+        bluetooth.onReady = { [weak self] deviceID in
+            self?.connectedDeviceID = deviceID
+            self?.setupButton.isEnabled = deviceID != nil
+        }
         bluetooth.onDevices = { [weak self] list in
             guard let self = self else { return }
             let previous = self.deviceMenu.indexOfSelectedItem
@@ -75,16 +79,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.isViewing = false; self.playButton.isEnabled = true; self.stopButton.isEnabled = false
             self.dimensions.stringValue = self.lastJPEG == nil ? "NO VIDEO RECEIVED" : "LAST FRAME • CONNECTION STOPPED"
         }
-        video.onFrame = { [weak self] data in
-            guard let self = self, let image = NSImage(data: data) else { return }
-            self.lastJPEG = data; self.imageView.image = image
+        video.onFrame = { [weak self] frame in
+            guard let self = self, self.isViewing else { return }
+            let image = NSImage(cgImage: frame.image, size: NSSize(width: frame.image.width, height: frame.image.height))
+            self.lastJPEG = frame.jpeg; self.imageView.image = image
             self.placeholder.isHidden = true; self.snapshotButton.isEnabled = true
             self.frameCount += 1
             self.dimensions.stringValue = "LIVE  •  \(Int(image.size.width)) × \(Int(image.size.height))  •  \(self.frameCount) frames"
         }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        bluetooth.scan()
     }
     func makeMenu() {
         let main = NSMenu()
@@ -172,12 +176,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     @objc func sendSetup() {
         let network = ssid.stringValue
-        guard !network.isEmpty, network.utf8.count <= 32 else { bluetoothStatus.stringValue = "Enter a Wi-Fi name of 1–32 bytes."; return }
         let secret = password.stringValue
-        guard secret.isEmpty || (8...63).contains(secret.utf8.count) || (secret.count == 64 && secret.allSatisfy(\.isHexDigit)) else {
-            bluetoothStatus.stringValue = "Use an 8–63 byte Wi-Fi password, a 64-digit hex key, or leave blank for an open network."; return
+        do { _ = try CameraSetup.payload(ssid: network, password: secret) }
+        catch CameraSetup.ValidationError.ssid { bluetoothStatus.stringValue = "Enter a Wi-Fi name of 1–32 bytes."; return }
+        catch { bluetoothStatus.stringValue = "Use an 8–63 byte Wi-Fi password, a 64-digit hex key, or leave blank for an open network."; return }
+        guard let deviceID = connectedDeviceID else { bluetoothStatus.stringValue = "Connect Bluetooth first."; return }
+        let alert = NSAlert()
+        alert.messageText = "Send Wi-Fi details to this camera?"
+        alert.informativeText = "Only continue if you recognize the connected camera. This setup protocol cannot verify its identity. A dedicated camera network limits access to your other devices."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Send Wi-Fi details")
+        guard alert.runModal() == .alertSecondButtonReturn else { return }
+        guard connectedDeviceID == deviceID else {
+            bluetoothStatus.stringValue = "The connected camera changed. Reconnect and try again."; return
         }
-        bluetooth.configureWiFi(ssid: network, password: secret)
+        bluetooth.configureWiFi(ssid: network, password: secret, expectedDeviceID: deviceID)
         password.stringValue = ""
     }
     @objc func startVideo() {

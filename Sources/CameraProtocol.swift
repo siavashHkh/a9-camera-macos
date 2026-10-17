@@ -40,16 +40,21 @@ struct JPEGDecoder {
     mutating func feed(_ bytes: Data) -> [Data] {
         buffer.append(bytes)
         if buffer.count > CameraWire.maxPayload { buffer.removeAll(); return [] }
-        var images: [Data] = []
+        var latest: Range<Data.Index>?
+        var cursor = buffer.startIndex
         while true {
-            guard let start = buffer.range(of: Data([0xff, 0xd8])) else {
-                buffer = Data(buffer.suffix(1)); break
+            guard let start = buffer.range(of: Data([0xff, 0xd8]), in: cursor..<buffer.endIndex) else {
+                cursor = max(cursor, buffer.endIndex - min(1, buffer.count)); break
             }
-            if start.lowerBound > buffer.startIndex { buffer.removeSubrange(buffer.startIndex..<start.lowerBound) }
-            guard let end = buffer.range(of: Data([0xff, 0xd9]), in: (buffer.startIndex + 2)..<buffer.endIndex) else { break }
-            images.append(Data(buffer[buffer.startIndex..<end.upperBound]))
-            buffer.removeSubrange(buffer.startIndex..<end.upperBound)
+            cursor = start.lowerBound
+            guard let end = buffer.range(of: Data([0xff, 0xd9]), in: start.upperBound..<buffer.endIndex) else { break }
+            latest = start.lowerBound..<end.upperBound
+            cursor = end.upperBound
         }
-        return images
+        // Keep only the newest complete frame. A hostile packet containing
+        // thousands of markers must not allocate thousands of UI jobs.
+        let result = latest.map { [Data(buffer[$0])] } ?? []
+        buffer.removeSubrange(buffer.startIndex..<cursor)
+        return result
     }
 }
