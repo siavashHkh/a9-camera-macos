@@ -1,5 +1,19 @@
 # GitHub CI results
 
+## 0.4.0 backend rewrite — 2026-10-18
+
+[Run 39125369577](https://github.com/siavashHkh/a9-camera-macos/actions/runs/39125369577) passed both jobs for source commit `8615cd3b89592134a7d69386e5a77a7bbaaa42c5`.
+
+- Apple Silicon/macOS 26.6.2 (25G83), Swift 6.3.3: direct-video, failure/timeout, setup/protocol-selection and AddressSanitizer checks passed, including the new gateway parsers and ten outward-camera integration scenarios.
+- The archive passed privacy/content checks, both executable permissions, strict signatures, exact main-app sandbox entitlements, Hardened Runtime and minimum-OS checks. The separately signed relay has no entitlements and runs outside the main app sandbox.
+- Ubuntu ClamAV 1.5.4 with daily 28157 scanned 41 files including source, relay and the CI archive: zero detections. FreshClam validated main 63, daily 28157 and bytecode 339. Its absent-clamd notification error was nonfatal; standalone scanning passed.
+
+CI archive SHA-256: `bb26637aa92770f90e9d5e088a6626264ca2acd170a1af8e704f2b31ba3f56ea`.
+
+The separately built public local ZIP has SHA-256 `4ab562092cff330f1a75166c8852dff5395922879a0f5ac35523bf0c5831e5cc`. Its exact local scan report is attached to the release. These are separate builds; bit-for-bit reproducibility is not claimed.
+
+Local GUI validation displayed synthetic gateway video and restored controls after Stop. The rewritten app freshly discovered a physical A9, connected its setup service and enabled notifications; the ready state remained stable beyond the connection deadline. No credentials were sent in that check. Physical video, Wi-Fi provisioning/association, the production sudo bind/drop relay path and router DNS setup remain unverified. Neither CI nor local checks provide Apple notarization or a guarantee of safety.
+
 ## 0.3.3 — 2026-10-18
 
 [Run 39082690324](https://github.com/siavashHkh/a9-camera-macos/actions/runs/39082690324) passed both jobs for source commit `7a33cda0f03a02e7c6d63abd0241b786100a1fcd`.
