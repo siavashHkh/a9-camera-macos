@@ -1,4 +1,20 @@
-# First GitHub CI result
+# GitHub CI results
+
+## 0.3.3 — 2026-10-18
+
+[Run 39082690324](https://github.com/siavashHkh/a9-camera-macos/actions/runs/39082690324) passed both jobs for source commit `7a33cda0f03a02e7c6d63abd0241b786100a1fcd`.
+
+- Apple Silicon/macOS 26.6.2 (25G83), Swift 6.3.3: all core/failure, AddressSanitizer, new setup/protocol-selection integration and package-verifier regression checks passed.
+- The sandboxed arm64 archive passed contents, privacy, strict code-signature, Hardened Runtime, exact entitlements, minimum OS and checksum checks.
+- Ubuntu ClamAV 1.5.4 with daily 28156 scanned 31 files, including source and the CI archive: zero detections. FreshClam logged the same nonfatal absent-clamd notification error described below; standalone scanning passed.
+
+CI archive SHA-256: `1b951d73bc62bfd9bfa6205c7c9d183e73aea07b4d056e981cf3da27aee58e17`.
+
+The separately built and locally scanned public release ZIP has SHA-256 `b222d939825012411e7f36c9dc709e93cfeb0043214fd267f5a4a4a37cc8cf78`. The release attaches its exact local scan report plus CI evidence. Different build environments/metadata produce different hashes; bit-for-bit reproducibility is not claimed.
+
+All automated camera traffic is simulated on localhost with fictitious credentials. These results do not establish physical-camera video or a successful Wi-Fi association, and do not provide Apple notarization or guarantee safety.
+
+## Historical first run — 0.3.2
 
 [Run 39066601959](https://github.com/siavashHkh/a9-camera-macos/actions/runs/39066601959) completed successfully on 2026-10-17, Europe/Helsinki. Both jobs passed for commit `b406f4f4d2c5750e7c2cdee97f729a3d2fc44704`. Production source, tests, build scripts, and entitlements are unchanged from release commit `1288797bd0fe2e750209468d97fb671f36c76462`; the later commit enables CI and updates documentation.
 
