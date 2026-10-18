@@ -18,6 +18,7 @@ info = plistlib.loads((root / "Info.plist").read_bytes())
 expected_entitlements = {
     "com.apple.security.app-sandbox": True,
     "com.apple.security.network.client": True,
+    "com.apple.security.network.server": True,
     "com.apple.security.device.bluetooth": True,
     "com.apple.security.files.user-selected.read-write": True,
 }
@@ -38,14 +39,20 @@ with zipfile.ZipFile(archive) as bundle:
         require(path.parts and path.parts[0] == "A9 Camera", "unexpected top-level path")
         require("__MACOSX" not in path.parts and not any(p.startswith("._") for p in path.parts), "resource fork metadata")
         require(not stat.S_ISLNK(item.external_attr >> 16), "unexpected symbolic link")
+        require(item.external_attr >> 16 & (stat.S_ISUID | stat.S_ISGID | stat.S_ISVTX) == 0, "unexpected privileged file mode")
         if item.is_dir():
             continue
         data = bundle.read(item)
         require(not re.search(rb"Nax_[0-9a-fA-F]{8,}", data), "personal camera hotspot name")
-        require(b"/Users/" not in data, "local user path")
+        # The protocol's literal MQTT topic contains /Users/; it is not a
+        # macOS home directory. Exempt that exact prefix, retaining the check
+        # for every other occurrence in binaries and documentation.
+        privacy_data = data.replace(b"Naxclow/P2P/Users/Device/", b"CAMERA_MQTT_TOPIC/")
+        require(b"/Users/" not in privacy_data, "local user path")
         allowed = {
             prefix + "Info.plist",
             prefix + "MacOS/A9Camera",
+            prefix + "Helpers/A9CameraRelay",
             prefix + "_CodeSignature/CodeResources",
             "A9 Camera/START HERE.txt",
             "A9 Camera/TEST-RESULTS.md",
@@ -56,14 +63,24 @@ with zipfile.ZipFile(archive) as bundle:
     require(packaged_info == info, "bundle metadata differs from source")
     require("A9InitialPeripheralIdentifier" not in packaged_info, "seeded Bluetooth identity")
     require(not any("Location" in key for key in packaged_info), "Location usage declaration")
-    executable = bundle.getinfo(prefix + "MacOS/A9Camera")
-    require(executable.external_attr >> 16 & stat.S_IXUSR, "executable permission missing")
+    for name in ("MacOS/A9Camera", "Helpers/A9CameraRelay"):
+        executable = bundle.getinfo(prefix + name)
+        require(executable.external_attr >> 16 & stat.S_IXUSR, f"executable permission missing: {name}")
 
 with tempfile.TemporaryDirectory(prefix="verify-release-", dir=root / "build") as temporary:
     subprocess.run(["ditto", "-x", "-k", str(archive), temporary], check=True)
     app = Path(temporary) / "A9 Camera/A9 Camera.app"
     binary = app / "Contents/MacOS/A9Camera"
     subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
+    relay = app / "Contents/Helpers/A9CameraRelay"
+    subprocess.run(["codesign", "--verify", "--strict", str(relay)], check=True)
+    require(subprocess.check_output(["lipo", "-archs", str(relay)], text=True).strip() == "arm64", "unexpected relay architecture")
+    relay_signing = subprocess.check_output(["codesign", "-dv", "--verbose=4", str(relay)], stderr=subprocess.STDOUT, text=True)
+    require(re.search(r"flags=0x[0-9a-f]+\([^\n]*\bruntime\b", relay_signing), "relay hardened runtime disabled")
+    relay_entitlements = subprocess.check_output(["codesign", "-d", "--entitlements", ":-", str(relay)], stderr=subprocess.DEVNULL)
+    require(not relay_entitlements.strip() or plistlib.loads(relay_entitlements) == {}, "unexpected relay entitlements")
+    relay_commands = subprocess.check_output(["otool", "-l", str(relay)], text=True)
+    require(re.search(r"minos\s+" + re.escape(info["LSMinimumSystemVersion"]) + r"\s", relay_commands), "relay minimum OS mismatch")
     signing = subprocess.check_output(["codesign", "-dv", "--verbose=4", str(app)], stderr=subprocess.STDOUT, text=True)
     require(re.search(r"flags=0x[0-9a-f]+\([^\n]*\bruntime\b", signing), "hardened runtime disabled")
     entitlements = subprocess.check_output(["codesign", "-d", "--entitlements", ":-", str(app)], stderr=subprocess.DEVNULL)

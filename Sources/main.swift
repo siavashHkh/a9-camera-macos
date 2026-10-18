@@ -19,6 +19,16 @@ func stack(_ views: [NSView], vertical: Bool = true, spacing: CGFloat = 10) -> N
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow!
     var bluetooth: CameraBluetooth!
+    enum Viewer { case direct, gateway }
+    var activeViewer: Viewer?
+    let gateway = CameraGateway()
+    let gatewayInterface = NSPopUpButton()
+    let gatewayCameraAddress = NSTextField()
+    let gatewayUID = NSTextField()
+    let gatewayDNS = NSButton(checkboxWithTitle:"Offer DNS to this camera",target:nil,action:nil)
+    let gatewayStart = NSButton(title:"Start gateway",target:nil,action:nil)
+    let gatewayRelayCommand = NSButton(title:"Copy relay command",target:nil,action:nil)
+    let gatewayStop = NSButton(title:"Stop gateway",target:nil,action:nil)
     let video = CameraVideoController()
     let hotspotSetup = CameraAPSetup()
     let setupTransport = NSPopUpButton()
@@ -50,12 +60,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         makeMenu()
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 750), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        window.title = "A9 Camera 0.3.3"
+        window.title = "A9 Camera " + (Bundle.main.object(forInfoDictionaryKey:"CFBundleShortVersionString") as? String ?? "development")
         window.minSize = NSSize(width: 1040, height: 750)
         window.center()
         window.contentView = buildContent()
         setupButton.isEnabled = false; connectButton.isEnabled = false
-        snapshotButton.isEnabled = false; stopButton.isEnabled = false
+        snapshotButton.isEnabled = false; stopButton.isEnabled = false; gatewayStop.isEnabled = false
         bluetooth = CameraBluetooth()
         bluetooth.onStatus = { [weak self] text in
             guard let self = self, self.setupTransport.indexOfSelectedItem == 0 else { return }
@@ -76,11 +86,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.devices = list
             self.deviceMenu.removeAllItems()
             self.deviceMenu.addItems(withTitles: list.map {
-                $0.signal == 127 ? "\($0.name)  •  previously found" : "\($0.name)  •  \($0.signal) dBm"
+                $0.signal == 127 ? "\($0.name)  •  signal unavailable" : "\($0.name)  •  \($0.signal) dBm"
             })
             if let id = selectedID, let index = list.firstIndex(where: { $0.id == id }) { self.deviceMenu.selectItem(at: index) }
             self.updateSetupControls()
         }
+        bluetooth.onSetupStarted = { [weak self] in self?.password.stringValue = "" }
+        hotspotSetup.onSetupStarted = { [weak self] in self?.password.stringValue = "" }
         bluetooth.onSetupFinished = { [weak self] phase in
             if phase == .acknowledged || phase == .unconfirmed { self?.afterSetup() }
         }
@@ -90,19 +102,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.hotspotSetupRunning = false; self.setupBusy = false; self.updateSetupControls()
             if outcome != .failed { self.afterSetup() }
         }
-        video.onStatus = { [weak self] text in self?.videoStatus.stringValue = text }
+        video.onStatus = { [weak self] text in
+            guard let self = self, self.activeViewer == .direct else { return }; self.videoStatus.stringValue = text
+        }
         video.onStopped = { [weak self] in
-            guard let self = self else { return }
-            self.isViewing = false; self.playButton.isEnabled = !self.setupBusy; self.stopButton.isEnabled = false
+            guard let self = self, self.activeViewer == .direct else { return }
+            self.isViewing = false; self.stopButton.isEnabled = false; self.updateSetupControls()
             self.dimensions.stringValue = self.lastJPEG == nil ? "NO VIDEO RECEIVED" : "LAST FRAME • CONNECTION STOPPED"
         }
+        video.onState = { [weak self] state in
+            guard let self = self, self.activeViewer == .direct else { return }
+            switch state {
+            case .connecting: self.dimensions.stringValue = "CONNECTING"
+            case .handshaking: self.dimensions.stringValue = "CHECKING CAMERA PROTOCOL"
+            case .waitingForFrames: if self.lastJPEG == nil { self.dimensions.stringValue = "WAITING FOR VIDEO" }
+            default: break
+            }
+        }
         video.onFrame = { [weak self] frame in
-            guard let self = self, self.isViewing else { return }
-            let image = NSImage(cgImage: frame.image, size: NSSize(width: frame.image.width, height: frame.image.height))
-            self.lastJPEG = frame.jpeg; self.imageView.image = image
-            self.placeholder.isHidden = true; self.snapshotButton.isEnabled = true
-            self.frameCount += 1
-            self.dimensions.stringValue = "LIVE  •  \(Int(image.size.width)) × \(Int(image.size.height))  •  \(self.frameCount) frames"
+            guard let self = self, self.activeViewer == .direct else { return }; self.display(frame)
+        }
+        gateway.onStatus = { [weak self] text in
+            guard let self = self, self.activeViewer == .gateway else { return }; self.videoStatus.stringValue = text
+        }
+        gateway.onPhase = { [weak self] phase in
+            guard let self = self, self.activeViewer == .gateway else { return }
+            switch phase {
+            case .starting: self.dimensions.stringValue = "STARTING GATEWAY"
+            case .waitingForCamera: self.dimensions.stringValue = "WAITING FOR CAMERA REGISTRATION"
+            case .bootstrap: self.dimensions.stringValue = "CAMERA REACHED GATEWAY"
+            case .registered, .negotiating: self.dimensions.stringValue = "OPENING CAMERA MEDIA CHANNEL"
+            case .waitingForVideo: if self.lastJPEG == nil { self.dimensions.stringValue = "WAITING FOR VIDEO" }
+            case .failed: self.isViewing = false; self.dimensions.stringValue = "GATEWAY ERROR"
+            case .stopped: self.isViewing = false
+            case .streaming: break
+            }
+            self.stopButton.isEnabled = self.isViewing; self.updateSetupControls()
+        }
+        gateway.onFrame = { [weak self] frame in
+            guard let self = self, self.activeViewer == .gateway else { return }; self.display(frame)
         }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -201,7 +239,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         deviceMenu.isEnabled = !setupBusy && useBluetooth
         setupTransport.isEnabled = !setupBusy
         ssid.isEnabled = !setupBusy; password.isEnabled = !setupBusy
-        address.isEnabled = !setupBusy; protocolMenu.isEnabled = !setupBusy
+        let serving = activeViewer == .gateway && isViewing
+        address.isEnabled = !setupBusy && !serving; protocolMenu.isEnabled = !setupBusy && !serving
+        gatewayRelayCommand.isEnabled = !setupBusy
+        gatewayStart.isEnabled = !setupBusy && !serving; gatewayStop.isEnabled = serving
+        gatewayInterface.isEnabled = !setupBusy && !serving; gatewayCameraAddress.isEnabled = !setupBusy && !serving
+        gatewayUID.isEnabled = !setupBusy && !serving; gatewayDNS.isEnabled = !setupBusy && !serving
         setupButton.isEnabled = !setupBusy && (!useBluetooth || connectedDeviceID != nil)
         playButton.isEnabled = !setupBusy && !isViewing
     }
@@ -215,9 +258,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func afterSetup() {
         if address.stringValue == "192.168.169.1" {
             address.stringValue = ""
-            UserDefaults.standard.removeObject(forKey: "cameraAddress")
+            UserDefaults.standard.set("",forKey:"cameraAddress")
         }
-        videoStatus.stringValue = "Rejoin home Wi-Fi and check your router for the camera. Its network join is unverified. Some firmware needs a separate local gateway for video; an IP alone may not work."
+        videoStatus.stringValue = "Rejoin home Wi-Fi and verify the camera in your router. For station-mode video, open Home video and configure the local gateway. Settings acknowledgement alone does not verify a Wi-Fi join."
     }
     @objc func sendSetup() {
         guard !setupBusy else { return }
@@ -251,7 +294,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             hotspotSetupRunning = true; bluetooth.disconnect()
             hotspotSetup.start(host: host, ssid: network, password: secret)
         }
-        password.stringValue = ""
     }
     @objc func startVideo() {
         guard !setupBusy else { return }
@@ -260,16 +302,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.set(host, forKey: "cameraAddress")
         let mode: CameraVideoController.Mode = protocolMenu.indexOfSelectedItem == 1 ? .classic : protocolMenu.indexOfSelectedItem == 2 ? .newer : .automatic
         UserDefaults.standard.set(mode.rawValue, forKey: "videoProtocolMode")
-        frameCount = 0; isViewing = true; lastJPEG = nil; imageView.image = nil
-        placeholder.isHidden = false; snapshotButton.isEnabled = false
+        stopVideo(); clearViewer(); activeViewer = .direct; isViewing = true
         playButton.isEnabled = false; stopButton.isEnabled = true
         dimensions.stringValue = "CONNECTING"
         video.start(host: host, mode: mode)
     }
+    func clearViewer() {
+        frameCount = 0; lastJPEG = nil; imageView.image = nil
+        placeholder.isHidden = false; snapshotButton.isEnabled = false
+    }
+    func display(_ frame: CameraFrame) {
+        guard isViewing else { return }
+        let image = NSImage(cgImage:frame.image,size:NSSize(width:frame.image.width,height:frame.image.height))
+        lastJPEG = frame.jpeg; imageView.image = image; placeholder.isHidden = true; snapshotButton.isEnabled = true
+        frameCount += 1
+        dimensions.stringValue = "LIVE • \(frame.image.width) × \(frame.image.height) • \(frameCount) frames"
+    }
     @objc func stopVideo() {
-        video.stop(); isViewing = false
-        playButton.isEnabled = !setupBusy; stopButton.isEnabled = false
+        activeViewer = nil; isViewing = false
+        video.stop(); gateway.stop()
+        stopButton.isEnabled = false; updateSetupControls()
         dimensions.stringValue = lastJPEG == nil ? "VIDEO STOPPED" : "LAST FRAME • VIDEO STOPPED"
+        videoStatus.stringValue = "Video stopped."
     }
     @objc func snapshot() {
         guard let data = lastJPEG else { return }
@@ -282,7 +336,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
-    func applicationWillTerminate(_ notification: Notification) { bluetooth.disconnect(); hotspotSetup.cancel(); video.stop() }
+    func applicationWillTerminate(_ notification: Notification) { bluetooth.disconnect(); hotspotSetup.cancel(); video.stop(); gateway.stop() }
 }
 extension NSBox {
     static func separator() -> NSBox { let box = NSBox(); box.boxType = .separator; return box }

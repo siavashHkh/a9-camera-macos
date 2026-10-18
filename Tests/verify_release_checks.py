@@ -18,6 +18,8 @@ cases = [
     ("traversal", [("A9 Camera/../../outside", b"test", None)], "unsafe archive path"),
     ("absolute", [("/outside", b"test", None)], "unsafe archive path"),
     ("symlink", [("A9 Camera/link", b"outside", stat.S_IFLNK | 0o777)], "unexpected symbolic link"),
+    ("setuid", [("A9 Camera/START HERE.txt", b"test", stat.S_IFREG | stat.S_ISUID | 0o755)], "unexpected privileged file mode"),
+    ("private path", [("A9 Camera/START HERE.txt", b"Naxclow/P2P/Users/Device/Info\x00/Users/example/private", None)], "local user path"),
     ("extra executable", [("A9 Camera/unexpected", b"test", None)], "unexpected packaged file"),
     ("expansion", [("A9 Camera/START HERE.txt", bytes(8 * 1024 * 1024 + 1), None)], "archive expansion limit"),
     ("entry count", [(f"A9 Camera/{i}/", b"", None) for i in range(33)], "too many archive entries"),

@@ -18,7 +18,18 @@ enum CameraWire {
     }
 }
 
-struct CameraPacket { let command: UInt32; let payload: Data }
+struct CameraPacket {
+    let command: UInt32
+    let payload: Data
+    var sequence: UInt32 = 0
+    var opcode: UInt16 { UInt16(truncatingIfNeeded: command) }
+    var flag: UInt8 { UInt8(truncatingIfNeeded: command >> 16) }
+    static func datagram(_ data: Data) throws -> CameraPacket {
+        guard data.count >= 20, data.count <= 65507,
+              Int(CameraWire.read32(data,0)) == data.count - 20 else { throw CameraParseError.oversized }
+        return CameraPacket(command: CameraWire.read32(data,4), payload: Data(data.dropFirst(20)), sequence: CameraWire.read32(data,16))
+    }
+}
 enum CameraParseError: Error { case oversized }
 struct PacketDecoder {
     var buffer = Data()
@@ -29,7 +40,7 @@ struct PacketDecoder {
             let length = Int(CameraWire.read32(buffer, 0))
             guard length <= CameraWire.maxPayload else { buffer.removeAll(); throw CameraParseError.oversized }
             guard buffer.count >= length + 20 else { break }
-            packets.append(CameraPacket(command: CameraWire.read32(buffer, 4), payload: Data(buffer.dropFirst(20).prefix(length))))
+            packets.append(CameraPacket(command: CameraWire.read32(buffer, 4), payload: Data(buffer.dropFirst(20).prefix(length)), sequence: CameraWire.read32(buffer,16)))
             buffer.removeFirst(length + 20)
         }
         return packets

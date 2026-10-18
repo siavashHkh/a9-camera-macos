@@ -1,257 +1,226 @@
 import Foundation
 import CoreBluetooth
 
-struct CameraDevice {
-    let id: UUID
-    let name: String
-    let signal: Int
+struct CameraDevice { let id: UUID; let name: String; let signal: Int }
+enum CameraBluetoothPhase: Equatable {
+    case idle, scanning, connecting(UUID), discovering(UUID), ready(UUID), provisioning(UUID), finished(CameraSetupAttempt.Phase), unavailable, failed
 }
 
+// CoreBluetooth runs on one queue. Each connection permits one setup write;
+// every terminal result drains that connection before another can be used.
 final class CameraBluetooth: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     var onDevices: (([CameraDevice]) -> Void)?
     var onStatus: ((String) -> Void)?
     var onReady: ((UUID?) -> Void)?
     var onBusy: ((Bool) -> Void)?
+    var onState: ((CameraBluetoothPhase) -> Void)?
+    var onSetupStarted: (() -> Void)?
     var onSetupFinished: ((CameraSetupAttempt.Phase) -> Void)?
-    private let queue = DispatchQueue(label: "local.a9.bluetooth")
-    private let callbacks = CameraCallbackGate()
-    private var central: CBCentralManager!
-    private var peripherals: [UUID: CBPeripheral] = [:]
-    private var devices: [UUID: CameraDevice] = [:]
+    private let queue = DispatchQueue(label:"local.a9.bluetooth")
+    private let gate = CameraCallbackGate()
+    private var generation = UUID()
+    private var phase = CameraBluetoothPhase.idle
+    private var central: CBCentralManager?
+    private var peripherals: [UUID:CBPeripheral] = [:]
+    private var devices: [UUID:CameraDevice] = [:]
+    private var lastSeen: [UUID:Date] = [:]
     private var selected: CBPeripheral?
-    private var pendingConnection: CBPeripheral?
-    private var cancellingID: UUID?
-    private var writeCharacteristic: CBCharacteristic?
-    private var notifyCharacteristic: CBCharacteristic?
+    private var cancelling: CBPeripheral?
+    private var pending: CBPeripheral?
+    private var write: CBCharacteristic?
+    private var notify: CBCharacteristic?
     private var wantsScan = false
-    private var session = UUID()
-    private var ready = false
-    private var connectionFailure: String?
-    private var connectionTimer = UUID()
+    private var connectionDeadline = UUID()
     private var setup = CameraSetupAttempt()
-
+    private var writeAttempt: UUID?
+    private var isProvisioning: Bool { if case .provisioning = phase { return true }; return false }
     private func emit(_ work: @escaping () -> Void) {
-        let current = session
-        DispatchQueue.main.async {
-            guard self.callbacks.isCurrent(current) else { return }
-            work()
-        }
+        let current = generation
+        DispatchQueue.main.async { guard self.gate.isCurrent(current) else { return }; work() }
     }
-    private func status(_ text: String) { emit { self.onStatus?(text) } }
-    private func setReady(_ value: Bool) {
-        ready = value
-        let id = value && !setup.isPending ? selected?.identifier : nil
-        emit { self.onReady?(id) }
+    private func move(_ next: CameraBluetoothPhase, _ message: String) {
+        phase = next
+        let ready: UUID? = { if case .ready(let id) = next { return id }; return nil }()
+        let busy = isProvisioning
+        emit { self.onState?(next); self.onReady?(ready); self.onBusy?(busy); self.onStatus?(message) }
     }
-    private func busy(_ value: Bool) { emit { self.onBusy?(value) } }
-    private func newSession() {
-        session = callbacks.advance()
-        pendingConnection = nil; cancellingID = nil; connectionFailure = nil; connectionTimer = UUID()
-        setup.reset(); busy(false)
+    private func invalidate() {
+        generation = gate.advance(); connectionDeadline = UUID(); writeAttempt = nil
+        setup.reset(); write = nil; notify = nil
+    }
+    private func cancelPeers() {
+        let all = [selected,pending,cancelling].compactMap{$0}
+        selected = nil; pending = nil; cancelling = nil
+        for peripheral in all where peripheral.state != .disconnected { central?.cancelPeripheralConnection(peripheral) }
     }
     func scan() {
         queue.async {
-            guard !self.setup.isPending else { return }
-            self.newSession()
-            self.wantsScan = true
-            if self.central == nil {
-                self.central = CBCentralManager(delegate: self, queue: self.queue)
-                return
-            }
-            let old = self.selected
-            self.selected = nil; self.writeCharacteristic = nil; self.notifyCharacteristic = nil
-            self.setReady(false)
-            if let old = old { self.central.cancelPeripheralConnection(old) }
-            if self.central.state == .poweredOn { self.beginScan() }
-            else { self.status("Waiting for Bluetooth. Allow access if macOS asks.") }
+            guard !self.isProvisioning else { return }
+            self.invalidate(); self.cancelPeers(); self.wantsScan = true
+            self.devices.removeAll(); self.peripherals.removeAll(); self.lastSeen.removeAll()
+            self.emit { self.onDevices?([]) }
+            self.move(.scanning,"Searching nearby for A9 cameras…")
+            if self.central == nil { self.central = CBCentralManager(delegate:self,queue:self.queue) }
+            else if self.central?.state == .poweredOn { self.beginScan() }
         }
     }
     private func beginScan() {
-        central.stopScan()
-        devices.removeAll(); peripherals.removeAll()
-        // A cached identifier is a selection preference, not a live discovery.
-        emit { self.onDevices?([]) }
-        status("Searching nearby for A9 cameras…")
-        central.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
-        let current = session
-        queue.asyncAfter(deadline: .now() + 15) {
-            guard self.session == current, self.wantsScan else { return }
-            self.central.stopScan(); self.wantsScan = false
-            self.status(self.devices.isEmpty
-                ? "No live A9 signal found. Keep it powered nearby, close other camera apps, then scan again."
-                : "Camera found nearby. Select it and click Connect Bluetooth.")
+        central?.stopScan()
+        central?.scanForPeripherals(withServices:nil,options:[CBCentralManagerScanOptionAllowDuplicatesKey:false])
+        let current = generation
+        queue.asyncAfter(deadline:.now()+15) {
+            guard self.gate.isCurrent(current), self.wantsScan else { return }
+            self.wantsScan = false; self.central?.stopScan()
+            self.move(.idle,self.devices.isEmpty ? "No live A9 signal found. Keep it powered nearby and scan again." : "Fresh camera signal found. Select it and connect Bluetooth.")
         }
     }
     func connect(id: UUID) {
         queue.async {
-            guard !self.setup.isPending else { return }
-            guard let central = self.central, let peripheral = self.peripherals[id] else {
-                self.status("Scan again to find a live camera signal."); return
+            guard !self.isProvisioning else { return }
+            if case .ready(let current) = self.phase, current == id { return }
+            if case .connecting(let current) = self.phase, current == id { return }
+            if case .discovering(let current) = self.phase, current == id { return }
+            guard self.central?.state == .poweredOn, let peripheral = self.peripherals[id],
+                  let seen = self.lastSeen[id], Date().timeIntervalSince(seen) <= 60 else {
+                self.move(.failed,"Scan again to find a fresh camera advertisement."); return
             }
-            if peripheral === self.selected, self.ready {
-                self.status("A9 connected • V720 Bluetooth setup supported"); return
-            }
-            if peripheral === self.selected, peripheral.state == .connecting { return }
-            let old = self.selected
-            self.newSession()
-            central.stopScan(); self.wantsScan = false
-            self.selected = nil; self.writeCharacteristic = nil; self.notifyCharacteristic = nil
-            self.setReady(false)
-            self.pendingConnection = peripheral
-            self.status("Connecting to \(peripheral.name ?? "A9")…")
-            // Wait for cancellation before connecting again. Cancelling and
-            // immediately reconnecting the same peripheral races didDisconnect.
+            let old = self.selected ?? self.cancelling
+            self.invalidate(); self.central?.stopScan(); self.wantsScan = false
+            self.selected = nil; self.pending = peripheral; self.cancelling = nil
+            self.move(.connecting(id),"Connecting to the selected camera…")
             if let old = old, old.state != .disconnected {
-                self.cancellingID = old.identifier
-                central.cancelPeripheralConnection(old)
-            } else if peripheral.state == .disconnecting {
-                self.cancellingID = peripheral.identifier
-            } else { self.beginConnection() }
-            let current = self.session
-            let timer = UUID(); self.connectionTimer = timer
-            self.queue.asyncAfter(deadline: .now() + 45) {
-                guard self.session == current, self.connectionTimer == timer else { return }
-                self.failConnection("Bluetooth connection timed out. Keep the camera nearby and close other camera apps, then scan again.")
+                self.cancelling = old; self.central?.cancelPeripheralConnection(old)
+            } else if peripheral.state == .disconnecting { self.cancelling = peripheral }
+            else { self.beginConnection() }
+            let current = self.generation; let deadline = UUID(); self.connectionDeadline = deadline
+            self.queue.asyncAfter(deadline:.now()+30) {
+                guard self.gate.isCurrent(current), self.connectionDeadline == deadline else { return }
+                self.fail("Bluetooth connection timed out. Keep the camera nearby, close other camera apps, then scan again.")
             }
         }
     }
     private func beginConnection() {
-        guard let peripheral = pendingConnection else { return }
-        pendingConnection = nil; cancellingID = nil; selected = peripheral
-        peripheral.delegate = self
-        central.connect(peripheral)
+        guard let peripheral = pending else { return }
+        pending = nil; cancelling = nil; selected = peripheral
+        peripheral.delegate = self; central?.connect(peripheral)
     }
-    private func failConnection(_ message: String) {
-        connectionTimer = UUID()
-        connectionFailure = message
-        let old = selected ?? pendingConnection
-        selected = nil; pendingConnection = nil; cancellingID = nil
-        setReady(false)
-        if let old = old { central.cancelPeripheralConnection(old) }
-        status(message)
+    private func fail(_ message: String) {
+        connectionDeadline = UUID(); writeAttempt = nil; write = nil; notify = nil
+        cancelPeers(); move(.failed,message)
     }
     func configureWiFi(ssid: String, password: String, expectedDeviceID: UUID) {
+        let current = gate.current()
         queue.async {
-            guard !self.setup.isPending else { return }
-            guard self.ready, let p = self.selected,
-                  p.identifier == expectedDeviceID, p.state == .connected,
-                  let write = self.writeCharacteristic else {
-                self.busy(false); self.status("Connect Bluetooth first."); return
+            guard self.gate.isCurrent(current), !self.isProvisioning else { return }
+            guard case .ready(let id) = self.phase, id == expectedDeviceID,
+                  let peripheral = self.selected, peripheral.identifier == id, peripheral.state == .connected,
+                  let characteristic = self.write, self.notify?.isNotifying == true else {
+                self.move(.failed,"Connect a fresh Bluetooth session before sending Wi-Fi settings."); return
             }
-            guard let data = try? CameraSetup.payload(ssid: ssid, password: password) else {
-                self.busy(false); self.status("Invalid Wi-Fi details."); return
+            guard let payload = try? CameraSetup.payload(ssid:ssid,password:password) else { self.move(.ready(id),"Invalid Wi-Fi details."); return }
+            guard payload.count <= peripheral.maximumWriteValueLength(for:.withResponse) else {
+                self.move(.ready(id),"Wi-Fi details exceed this Bluetooth connection’s message size. Use classic camera-hotspot setup instead."); return
             }
-            guard data.count <= p.maximumWriteValueLength(for: .withResponse) else {
-                self.busy(false); self.status("Wi-Fi details exceed the camera’s Bluetooth message size. Try camera Wi-Fi setup instead."); return
-            }
-            let attempt = self.setup.begin()
-            self.busy(true); self.setReady(false)
-            self.status("Sending Wi-Fi details directly to the camera…")
-            p.writeValue(data, for: write, type: .withResponse)
-            let current = self.session
-            self.queue.asyncAfter(deadline: .now() + 30) {
-                guard self.session == current, self.setup.timeOut(generation: attempt) else { return }
-                self.busy(false)
-                self.setReady(p.state == .connected && self.notifyCharacteristic?.isNotifying == true)
-                self.status(self.setup.status)
-                self.emit { self.onSetupFinished?(.unconfirmed) }
+            let attempt = self.setup.begin(); self.writeAttempt = attempt
+            self.move(.provisioning(id),"Sending Wi-Fi settings to the camera…")
+            self.emit { self.onSetupStarted?() }
+            peripheral.writeValue(payload,for:characteristic,type:.withResponse)
+            self.queue.asyncAfter(deadline:.now()+20) {
+                guard self.gate.isCurrent(current), self.isProvisioning, self.setup.timeOut(generation:attempt) else { return }
+                self.finishSetup(.unconfirmed)
             }
         }
     }
+    private func finishSetup(_ result: CameraSetupAttempt.Phase) {
+        let message = setup.status
+        connectionDeadline = UUID(); writeAttempt = nil; write = nil; notify = nil
+        cancelPeers()
+        move(.finished(result),message)
+        emit { self.onSetupFinished?(result) }
+    }
     func disconnect() {
+        let current = gate.advance()
         queue.async {
-            self.newSession(); self.wantsScan = false; self.central?.stopScan()
-            let old = self.selected
-            self.selected = nil; self.writeCharacteristic = nil; self.notifyCharacteristic = nil
-            self.setReady(false)
-            if let old = old { self.central?.cancelPeripheralConnection(old) }
+            guard self.gate.isCurrent(current) else { return }
+            self.generation = current; self.connectionDeadline = UUID(); self.writeAttempt = nil
+            self.wantsScan = false; self.central?.stopScan(); self.setup.reset()
+            self.write = nil; self.notify = nil; self.cancelPeers()
+            self.move(.idle,"Bluetooth disconnected.")
         }
     }
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        if central.state == .poweredOn {
+            if wantsScan { beginScan() }
+            else if selected == nil { move(.idle,"Bluetooth is ready. Scan for the camera.") }
+            return
+        }
+        if isProvisioning {
+            _ = setup.didDisconnect(); _ = setup.timeOut(generation:setup.generation)
+            finishSetup(.unconfirmed); return
+        }
+        connectionDeadline = UUID(); cancelPeers(); write = nil; notify = nil
         switch central.state {
-        case .poweredOn:
-            if wantsScan { beginScan() } else { status("Bluetooth is ready. Click Scan for A9.") }
-        case .poweredOff: setReady(false); status("Turn on Bluetooth in System Settings.")
-        case .unauthorized: setReady(false); status("Allow A9 Camera under System Settings → Privacy & Security → Bluetooth.")
-        case .unsupported: status("Bluetooth is unavailable in this session.")
-        default: status("Waiting for Bluetooth…")
+        case .poweredOff: move(.unavailable,"Turn on Bluetooth in System Settings.")
+        case .unauthorized: move(.unavailable,"Allow A9 Camera under Privacy & Security → Bluetooth.")
+        case .unsupported: move(.unavailable,"Bluetooth is unavailable on this Mac.")
+        default: move(.unavailable,"Waiting for Bluetooth…")
         }
     }
-    func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String: Any], rssi RSSI: NSNumber) {
+    func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String:Any], rssi RSSI: NSNumber) {
         guard wantsScan else { return }
         let name = advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? peripheral.name ?? ""
         let services = advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID] ?? []
-        guard name.uppercased().contains("A9") || name.lowercased().hasPrefix("nax") || name.uppercased().contains("V720") || services.contains(CBUUID(string: "FFF9")) else { return }
-        guard devices[peripheral.identifier] != nil || devices.count < 128 else { return }
-        peripherals[peripheral.identifier] = peripheral
-        devices[peripheral.identifier] = CameraDevice(id: peripheral.identifier, name: name.isEmpty ? "V720 setup device" : name, signal: RSSI.intValue)
-        let list = devices.values.sorted { $0.id.uuidString < $1.id.uuidString }
+        guard name.uppercased().contains("A9") || name.lowercased().hasPrefix("nax") || name.uppercased().contains("V720") || services.contains(CBUUID(string:"FFF9")),
+              devices[peripheral.identifier] != nil || devices.count < 128 else { return }
+        peripherals[peripheral.identifier] = peripheral; lastSeen[peripheral.identifier] = Date()
+        devices[peripheral.identifier] = CameraDevice(id:peripheral.identifier,name:name.isEmpty ? "V720 setup device" : name,signal:RSSI.intValue)
+        let list = devices.values.sorted{$0.id.uuidString < $1.id.uuidString}
         emit { self.onDevices?(list) }
     }
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         guard peripheral === selected else { central.cancelPeripheralConnection(peripheral); return }
-        UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: "lastCameraIdentifier")
-        status("Connected. Checking camera setup service…")
-        peripheral.discoverServices([CBUUID(string: "FFF9")])
+        move(.discovering(peripheral.identifier),"Connected. Checking camera setup service…")
+        peripheral.discoverServices([CBUUID(string:"FFF9")])
     }
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        guard peripheral === selected else { return }
-        failConnection("Could not connect to the camera. Keep it powered nearby and scan again.")
+        guard peripheral === selected else { return }; fail("Could not connect. Keep the camera powered nearby and scan again.")
     }
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
-        if peripheral.identifier == cancellingID {
-            cancellingID = nil
-            if pendingConnection != nil { beginConnection() }
-            return
-        }
+        if peripheral === cancelling { cancelling = nil; beginConnection(); return }
         guard peripheral === selected else { return }
-        connectionTimer = UUID()
-        setReady(false)
-        if let failure = connectionFailure { status(failure) }
-        else if setup.didDisconnect() || setup.phase == .acknowledged || setup.phase == .unconfirmed || setup.phase == .failed {
-            status(setup.status)
-        } else { status("Bluetooth disconnected. Scan to reconnect.") }
+        if isProvisioning {
+            _ = setup.didDisconnect(); _ = setup.timeOut(generation:setup.generation)
+            finishSetup(.unconfirmed)
+        } else { fail("Bluetooth disconnected. Scan for a fresh signal before reconnecting.") }
     }
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard peripheral === selected else { return }
-        guard error == nil, let service = peripheral.services?.first(where: { $0.uuid == CBUUID(string: "FFF9") }) else {
-            failConnection("This device does not expose the supported V720 setup service."); return
-        }
-        peripheral.discoverCharacteristics([CBUUID(string: "FFF7"), CBUUID(string: "FFF8")], for: service)
+        guard error == nil, let service = peripheral.services?.first(where:{$0.uuid == CBUUID(string:"FFF9")}) else { fail("This device does not expose the supported camera setup service."); return }
+        peripheral.discoverCharacteristics([CBUUID(string:"FFF7"),CBUUID(string:"FFF8")],for:service)
     }
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         guard peripheral === selected else { return }
-        guard error == nil else { failConnection("Could not read camera setup characteristics. Scan and reconnect."); return }
-        writeCharacteristic = service.characteristics?.first { $0.uuid == CBUUID(string: "FFF8") && $0.properties.contains(.write) }
-        notifyCharacteristic = service.characteristics?.first { $0.uuid == CBUUID(string: "FFF7") && $0.properties.contains(.notify) }
-        guard writeCharacteristic != nil, let notify = notifyCharacteristic else {
-            failConnection("Camera setup characteristics are missing."); return
-        }
-        peripheral.setNotifyValue(true, for: notify)
+        guard error == nil else { fail("Could not discover camera setup characteristics."); return }
+        write = service.characteristics?.first{$0.uuid == CBUUID(string:"FFF8") && $0.properties.contains(.write)}
+        notify = service.characteristics?.first{$0.uuid == CBUUID(string:"FFF7") && $0.properties.contains(.notify)}
+        guard write != nil, let notify = notify else { fail("Supported camera write/notification characteristics are missing."); return }
+        peripheral.setNotifyValue(true,for:notify)
     }
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
-        guard peripheral === selected, characteristic === notifyCharacteristic else { return }
-        if error == nil && characteristic.isNotifying {
-            connectionTimer = UUID()
-            setReady(true); status("A9 connected • V720 Bluetooth setup supported")
-        } else { failConnection("Camera notifications could not be enabled. Scan and reconnect.") }
+        guard peripheral === selected, characteristic === notify else { return }
+        guard error == nil, characteristic.isNotifying else { fail("Camera notifications could not be enabled."); return }
+        connectionDeadline = UUID()
+        move(.ready(peripheral.identifier),"A9 connected • V720 Bluetooth setup ready")
     }
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
-        guard peripheral === selected, characteristic === writeCharacteristic,
-              setup.wrote(success: error == nil, generation: setup.generation) else { return }
-        if !setup.isPending {
-            busy(false); setReady(peripheral.state == .connected && notifyCharacteristic?.isNotifying == true)
-            emit { self.onSetupFinished?(.failed) }
-        }
-        status(setup.status)
+        guard peripheral === selected, characteristic === write, isProvisioning, let attempt = writeAttempt,
+              setup.wrote(success:error == nil,generation:attempt) else { return }
+        if error != nil { finishSetup(.failed) }
+        else { move(.provisioning(peripheral.identifier),setup.status) }
     }
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
-        guard peripheral === selected, characteristic === notifyCharacteristic,
-              setup.isPending, error == nil, let data = characteristic.value else { return }
-        if setup.acknowledge(data) {
-            busy(false); setReady(false); status(setup.status)
-            emit { self.onSetupFinished?(.acknowledged) }
-            central.cancelPeripheralConnection(peripheral)
-        } else { status(CameraSetup.responseStatus(data)) }
+        guard peripheral === selected, characteristic === notify, isProvisioning, error == nil, let data = characteristic.value else { return }
+        if setup.acknowledge(data) { finishSetup(.acknowledged) }
+        else { move(.provisioning(peripheral.identifier),CameraSetup.responseStatus(data)) }
     }
 }

@@ -1,53 +1,44 @@
-A9 Camera for Mac — version 0.3.3 (experimental public preview)
+A9 Camera for Mac — 0.4.0 experimental backend preview
 
-Requires Apple Silicon (M1 or later) and macOS 26 or later.
-This app is ad hoc signed and is not Apple notarized.
-It enables macOS App Sandbox and Hardened Runtime.
+Apple Silicon, macOS 26+. Ad hoc signed, not Apple notarized.
 
-Extract the ZIP and open A9 Camera.app. macOS may block a downloaded copy;
-approve this specific app in Privacy & Security only if you trust it.
-Bluetooth and Local Network access are used for their respective features.
-Location Services is not required.
+DIRECT VIDEO
+Join the camera hotspot in macOS. In Camera Wi-Fi, choose I joined camera
+Wi-Fi — connect. Usual IP: 192.168.169.1, TCP 6123. Automatic protocol
+selection tries classic then newer only for eligible stream/protocol failures.
 
-DIRECT CAMERA WI-FI
-1. Power on your camera.
-2. Use macOS Wi-Fi settings to join its hotspot (often Nax_..., A9, or V720).
-3. In Camera Wi-Fi, click I joined camera Wi-Fi — connect.
-   Default: 192.168.169.1, Automatic (classic first), TCP port 6123.
-4. Try the other V720 protocol or a different local IP if your camera needs it.
-5. Save snapshot saves the current JPEG; Stop ends the stream.
+WI-FI SETUP
+Use Wi-Fi setup to connect a fresh Bluetooth session or join the classic
+camera hotspot. Enter the 2.4 GHz SSID/password and check the recipient before
+sending. A disconnect without acknowledgement is unconfirmed. Check the
+router before resending. Passwords are not saved or logged.
 
-The Wi-Fi buttons open settings. They do not join a network automatically.
-Joining the camera hotspot may interrupt internet access on the Mac.
+HOME VIDEO
+Station-mode cameras may connect outward instead of listening for direct-IP
+video. Home video provides a native local gateway for that path.
+- Select the Mac IP, camera IP and UID from the camera label/hotspot.
+- Configure the camera's DNS so v720.naxclow.com and v720.p2p.naxclow.com
+  resolve to this Mac. This is a router/camera DNS step; setting only the Mac's
+  resolver does not configure the camera.
+- Start the gateway. Copy its relay command, review and run it in Terminal.
+  macOS requires administrator permission to bind the camera's legacy ports.
+  The relay drops to your user before handling traffic and installs no service.
+  Stop the relay with Control-C. Never send the admin password in a chat.
+- Restart the camera and watch bootstrap, registration, media and video status.
+The optional camera DNS responder is not a general household DNS resolver.
 
-HOME WI-FI SETUP
-Choose Bluetooth, scan for a live camera and connect; or choose Camera Wi-Fi
-(classic V720), join the camera hotspot manually, and enter its IP on the right.
-Enter the 2.4 GHz SSID/password and check the recipient before sending.
-Acceptance of settings does not verify a successful network join. A disconnect
-without acknowledgement is unconfirmed. Check the router before resending.
-Rejoin home Wi-Fi afterward; some firmware requires a separate local gateway
-for video even if the camera has a router IP. The app does not provide it.
+SECURITY AND LIMITS
+The main app is sandboxed and hardened. The explicitly started gateway accepts
+only the configured camera IP/UID/session token. The temporary relay is a
+separately hardened command-line program; after binding it runs as your user
+outside the app sandbox. It performs no filesystem or shell operations.
+The firmware protocols are plaintext and do not cryptographically verify the
+camera. Prefer a dedicated trusted camera network. Firmware can independently
+contact vendor services.
 
-TEST STATUS
-Packet parsing, both MJPEG handshakes, failure handling, timeout, cancellation,
-and the GUI are tested using simulated cameras. See TEST-RESULTS.md.
-Physical-camera streaming was not revalidated for this release.
-The supplied 0.3.0 guide reports a historical camera test on 2026-10-11;
-that report is not new test evidence for this release.
+Automated tests use fictitious cameras and high localhost ports. They do not
+prove hardware compatibility or production privileged-port startup. See the
+attached test/security reports for this release's completed checks.
+MJPEG/snapshots are supported. H.264, audio, recording and SD management are not.
 
-LIMITS
-Home Wi-Fi provisioning and streaming through a router remain experimental.
-Some camera firmware needs vendor registration or extra local server setup.
-H.264, audio, recording, AI detection, motion alerts, and SD-card management
-are not implemented. No firmware images or firmware updater are included.
-No personal camera identity or Wi-Fi password is bundled with this release.
-
-SECURITY
-The camera TCP protocol is unencrypted and does not verify camera identity.
-Bluetooth link encryption has not been verified. Use a dedicated camera
-network and only send credentials to a device you recognize.
-See SECURITY-REVIEW.md for the hardening changes and remaining risks.
-
-Source, checksums, and release notes:
 https://github.com/siavashHkh/a9-camera-macos

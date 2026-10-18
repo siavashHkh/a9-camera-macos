@@ -1,6 +1,20 @@
 # A9 Camera validation
 
-## Current release: 0.3.3
+## Backend rewrite: 0.4.0
+
+Local validation date: 2026-10-18 (Europe/Helsinki), Apple Silicon/macOS 27.0, target arm64/macOS 26+.
+
+The retained direct-video, failure/timeout, provisioning, callback and package-tampering checks passed after replacing the backend. New AddressSanitizer checks passed bounded bootstrap HTTP, UID admission, camera-only DNS including EDNS, MQTT identity/topics, UDP datagram limits, out-of-order/wrapping/expired JPEG fragments, typed handshake failures and 10,000 deterministic malformed gateway inputs. The gateway integration test decoded the original synthetic JPEG from an outward-connected camera after bootstrap, registration and UDP negotiation. It verified retransmission acknowledgements, wrong UID/token/source rejection, occupied-port cleanup, stale start cancellation, active-session replacement, temporary relay HTTP/DNS forwarding, relay peer rejection and recovery after a malformed request. Tests use only loopback/high ports and fictitious camera credentials.
+
+A localhost bind check on this Mac denied production ports 80 and 53 without administrator permission. The included relay addresses that constraint by binding before dropping privileges. The rootless relay path was exercised under AddressSanitizer on high ports; privileged binding and UID/GID drop under sudo have not yet been exercised. No administrator relay was started and no router DNS settings were changed during automated validation.
+
+Physical observations on the preceding 0.3.3 app confirmed fresh A9 Bluetooth discovery, service/notification readiness and a persistent ready state. A user-initiated Wi-Fi setup ended without acknowledgement; a new local-network candidate appeared afterward, but its identity and camera association were not independently confirmed. No physical video was received. These observations are not a hardware pass for the rewritten 0.4.0 Bluetooth/gateway code. Personal addresses, SSIDs and identifiers are excluded from this public report.
+
+The sandboxed 0.4.0 GUI opened with all three connection panels. An outward-connected synthetic camera completed bootstrap, registration and UDP negotiation, and the GUI displayed its 2×2 blue JPEG continuously. Stop restored the controls. The home-video guidance scrolls, its network/camera fields lock during a session, and the synthetic image and saved test inputs were cleared afterward. This test used the Mac's own local address as the fictitious camera source, bypassing the production relay and router DNS.
+
+Final package/CI evidence is recorded in the release validation report. Production station-mode video depends on the camera receiving the configured DNS answers, the temporary relay and supported firmware.
+
+## Historical release: 0.3.3
 
 Test date: 2026-10-18. Local host: Apple Silicon/macOS 27.0; target: arm64/macOS 26.0+.
 

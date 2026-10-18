@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0 — 2026-10-18
+
+- Replace duplicated direct handshakes and status-text fallback with a shared protocol machine and typed errors/states.
+- Rebuild CoreBluetooth ownership around explicit phases, fresh advertisement expiry and one provisioning attempt per connection; drain before reconnect and classify disconnects immediately as unconfirmed.
+- Share a bounded frame-delivery pipeline between direct viewing and the new station-mode local gateway.
+- Add HTTP bootstrap, UID/session admission, MQTT compatibility, UDP negotiation, fragment reordering and retransmission acknowledgements. Bind to a selected local address and reject unrelated camera peers.
+- Drain listeners and connections before gateway restart; surface occupied-port and negotiation failures.
+- Add a temporary hardened camera-port relay. It binds legacy ports with administrator permission, drops UID/GID and supplementary groups before camera traffic, and forwards only to the app’s loopback services. It installs no persistent service.
+- Add Home video configuration, current-interface selection, UID-prefix normalization and a safely quoted relay command. Main app gains the incoming-network sandbox entitlement; relay startup and camera DNS remain manual.
+- Add gateway/relay integration, admission, restart, malformed-input and command-quoting checks. Existing direct-video/provisioning regression checks are retained.
+
+Physical station-mode streaming, production privileged-port startup and router DNS configuration require a separate hardware/admin validation. The app remains ad hoc signed and not Apple notarized.
+
 ## 0.3.3 — 2026-10-18
 
 - Require fresh Bluetooth discovery, wait for disconnect before reconnecting, and preserve connection timeout messages. Cancel the connection timeout when setup becomes ready.

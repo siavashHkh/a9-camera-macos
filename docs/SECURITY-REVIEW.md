@@ -1,4 +1,4 @@
-# Security review — A9 Camera 0.3.3
+# Security review — A9 Camera 0.4.0
 
 Review dates: 2026-10-17 and 2026-10-18. This is a source review and targeted hardening effort, with adversarial-input and functional tests. It is not an independent certification or a guarantee that the app is safe.
 
@@ -10,7 +10,19 @@ No intentional shell execution, downloaded-code execution, login-item installati
 
 The third-party APKs, decompiled reference sources, and three firmware candidates in the complete research archive are not dependencies of the Swift app and are excluded from this repository and release. They were not executed, flashed, or certified malware-free.
 
-## 0.3.3 connection and setup review
+## 0.4.0 backend and gateway review
+
+The new main-app entitlement `com.apple.security.network.server` permits the explicitly started local gateway. Camera control TCP/6123, media UDP/6123 and the restricted MQTT service TCP/1883 bind the selected local IPv4 and reject source IPs other than the configured camera. HTTP/8080 and optional DNS/1053 bind loopback in the app's relay mode. No listener starts at app launch. Stop/restart drains old listeners and connections before rebinding. Decoded frames use generation-gated, bounded delivery shared with direct viewing.
+
+Gateway bootstrap accepts bounded POST requests for the documented camera endpoints, checks the configured UID and returns a new session token. Registration requires that UID/token from the allowed camera address. MQTT accepts only that device identity and its own subscription/status topics; it is not a general broker. DNS answers only the two camera service names and does not forward unrelated queries. HTTP, MQTT, datagram and fragment windows have independent size/lifetime limits. Raw peer payloads, tokens and Wi-Fi secrets are not displayed or logged.
+
+The separate hardened relay binds the camera's legacy ports, then clears supplementary groups, sets real/effective GID/UID to the invoking sudo user and refuses to serve while root. It checks source IP before forwarding, connects only to loopback high ports, caps concurrent workers and bytes, and enforces socket/request deadlines. It contains no file operations, shell execution, installer or persistent service. It is not inside the main app sandbox; compromise after privilege drop would have the invoking user's access. Its early startup runs with administrator privilege solely for argument validation/socket binding/privilege drop. This is an additional trusted component and requires explicit user startup. Rootless forwarding/parser paths were tested under AddressSanitizer; the production sudo/drop path still needs explicit admin validation.
+
+Router DNS and relay startup are manual. No router, DNS, firewall, Gatekeeper or quarantine settings are changed automatically. No privileged helper service is installed. The archive verifier rejects privileged file mode bits and verifies the relay separately, alongside the exact five main-app entitlements. IP, UID and per-run token checks are admission controls over a plaintext firmware protocol, not cryptographic proof of camera identity.
+
+The rewritten Bluetooth driver uses one queue and explicit phases, expires discovery results, permits one setup attempt per connection and closes it on a terminal result. Shared direct-protocol states replace duplicated handshakes and visible-string-driven fallback. Credentials remain in transient Swift/OS buffers; secure erasure is not claimed. Preferences may retain camera addresses, protocol choice and gateway UID, but no Wi-Fi password.
+
+## Historical 0.3.3 connection and setup review
 
 New hotspot setup uses the existing plaintext classic V720 protocol and the same canonical local IPv4 restriction. It does not add cloud access, entitlements, credential persistence, firmware updates or router administration. The confirmation shows the chosen recipient and SSID; fields/transport are locked during delivery. The setup socket closes after completion/cancellation, unsent payload references are cleared, raw replies are not displayed, and packet sizes remain bounded. Command 299 is requested only after command 204 is accepted. Acknowledgement of settings is explicitly distinguished from network association.
 
@@ -27,7 +39,7 @@ Bluetooth reconnects wait for cancellation, use fresh discoveries, invalidate st
 | Credential echo exposure | Unknown Bluetooth notification bytes were formatted into visible status text. A peer could echo submitted credentials. Replies now display only a generic status and byte count; tests inject an echoed test secret and check that neither its text nor its hex encoding is displayed. |
 | Provisioning recipient | The UI asks for confirmation, and the Bluetooth write rechecks that the connected peripheral is the exact device selected for that operation. Input validation also runs at the write boundary. Expected service/characteristic checks are retained and callbacks must refer to the expected characteristic. These checks do not provide cryptographic authentication. |
 | Bluetooth discovery | Bluetooth initialization starts on an explicit Scan action, duplicate advertisements are disabled, and retained results are capped at 128 devices. Provisioning cannot be interrupted by a new scan. |
-| Host access | App Sandbox is enabled. Entitlements allow outgoing network clients, Bluetooth, and user-selected read/write files. There is no network-server entitlement, broad file-access exception, debug entitlement, disabled library validation, or executable-memory exception. Hardened Runtime is enabled. This provides containment if the app is compromised; it does not make the camera protocol secure. |
+| Host access | App Sandbox is enabled. Entitlements allow outgoing network clients, Bluetooth, and user-selected read/write files. The 0.3.2/0.3.3 builds had no network-server entitlement. Version 0.4.0 adds it for the gateway as described above. There is no broad file-access exception, debug entitlement, disabled library validation, or executable-memory exception. Hardened Runtime is enabled. This provides containment if the app is compromised; it does not make the camera protocol secure. |
 | Packaging | Fresh staging prevents stale bundle files from being carried into a release. The verifier checks allowed files, duplicate paths, an archive expansion limit, executable permissions, signature, exact entitlement set, minimum OS, and checksums. Verification uses explicit checks that remain enabled under `python3 -O`. |
 
 ## Tests and evidence

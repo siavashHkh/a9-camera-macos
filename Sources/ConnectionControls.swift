@@ -17,7 +17,7 @@ extension AppDelegate {
             button(NSButton(title: "I joined camera Wi-Fi — connect", target: nil, action: nil), #selector(connectHotspotVideo)),
             NSBox.separator(),
             label("Already on your home network?", size: 13, bold: true),
-            label("Use its router-assigned IP on the right. Some firmware needs an additional local gateway for home-network video.", size: 12, secondary: true),
+            label("Use Home video to run the local gateway for station-mode firmware. Direct-IP viewing on the right is for cameras that expose a listening video service.", size: 12, secondary: true),
             button(NSButton(title: "Return to home Wi-Fi…", target: nil, action: nil), #selector(openWiFiSettings)),
             label("The camera hotspot may interrupt internet. Use the Mac’s Wi-Fi picker to rejoin your home network afterward.", size: 11, secondary: true)
         ], spacing: 10)
@@ -32,13 +32,13 @@ extension AppDelegate {
             label("Camera Wi-Fi method: join the camera hotspot first and use its IP on the right. Details go directly to the camera; passwords are not saved.", size: 11, secondary: true),
             NSBox.separator(),
             label("After setup", size: 13, bold: true),
-            label("Rejoin home Wi-Fi and verify the camera in your router. An acknowledgement confirms settings were accepted, not that the camera joined. Some firmware needs a separate local gateway for video.", size: 12, secondary: true),
+            label("Rejoin home Wi-Fi and verify the camera in your router. An acknowledgement confirms settings acceptance. For station-mode video, configure the gateway in Home video.", size: 12, secondary: true),
             label("Account-free setup is experimental. Firmware may require vendor registration and may contact the vendor once online.", size: 11, secondary: true)
         ], spacing: 10)
         let tabs = NSTabView()
         tabs.tabViewType = .topTabsBezelBorder
         tabs.font = .systemFont(ofSize: 12)
-        for (name, content) in [("Camera Wi-Fi", hotspot), ("Home Wi-Fi setup", home)] {
+        for (name, content) in [("Camera Wi-Fi", hotspot), ("Wi-Fi setup", home), ("Home video", makeGatewayControls())] {
             let item = NSTabViewItem(identifier: name); item.label = name
             let container = FlippedView()
             let scroll = NSScrollView()

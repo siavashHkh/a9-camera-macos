@@ -5,9 +5,11 @@ mkdir -p build/module-cache
 work=$(mktemp -d build/app.XXXXXX)
 trap 'rm -rf "$work"' EXIT
 app="$work/A9 Camera.app"
-mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" build/module-cache
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$app/Contents/Helpers" build/module-cache
 cp Info.plist "$app/Contents/Info.plist"
 swiftc -O -target arm64-apple-macos26.0 -module-cache-path build/module-cache Sources/*.swift -o "$app/Contents/MacOS/A9Camera" -framework AppKit -framework CoreBluetooth -framework Network -framework ImageIO
+swiftc -O -target arm64-apple-macos26.0 -module-cache-path build/module-cache Relay/SocketRelay.swift -o "$app/Contents/Helpers/A9CameraRelay"
+codesign --force --sign - --options runtime --identifier local.a9.camera.relay "$app/Contents/Helpers/A9CameraRelay"
 codesign --force --sign - --options runtime --entitlements Entitlements.plist "$app"
 rm -rf "build/A9 Camera.app"
 mv "$app" "build/A9 Camera.app"

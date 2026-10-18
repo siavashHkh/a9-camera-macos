@@ -7,13 +7,14 @@ final class CameraVideoController {
     var onStatus: ((String) -> Void)?
     var onFrame: ((CameraFrame) -> Void)?
     var onStopped: (() -> Void)?
+    var onState: ((CameraVideoState) -> Void)?
     private var client: CameraVideo?
     private var generation = UUID()
     private var attempt = UUID()
     private var host = ""
     private var protocols: [Bool] = []
     private var receivedFrame = false
-    private var lastStatus = ""
+    private var failure: CameraFailure?
 
     func start(host: String, mode: Mode) {
         client?.stop(); generation = UUID()
@@ -24,31 +25,38 @@ final class CameraVideoController {
     func stop() {
         generation = UUID(); attempt = UUID(); protocols = []
         client?.stop(); client = nil
-        onStatus?("Video stopped.")
+        onStatus?("Video stopped."); onState?(.stopped)
     }
     private func beginAttempt() {
         guard !protocols.isEmpty else { return }
         let modern = protocols.removeFirst()
         let current = generation; let trial = UUID(); attempt = trial
-        receivedFrame = false; lastStatus = ""
+        receivedFrame = false; failure = nil
         let video = CameraVideo(); client = video
         video.onStatus = { [weak self] text in
             guard let self = self, self.generation == current, self.attempt == trial else { return }
-            self.lastStatus = text
             self.onStatus?(text)
         }
         video.onFrame = { [weak self] frame in
             guard let self = self, self.generation == current, self.attempt == trial else { return }
             self.receivedFrame = true; self.onFrame?(frame)
         }
+        video.onState = { [weak self] state in
+            guard let self = self, self.generation == current, self.attempt == trial else { return }
+            if case .failed = state { return }; self.onState?(state)
+        }
+        video.onFailure = { [weak self] failure in
+            guard let self = self, self.generation == current, self.attempt == trial else { return }
+            self.failure = failure
+        }
         video.onStopped = { [weak self, weak video] in
             guard let self = self, self.generation == current, self.attempt == trial else { return }
-            let retry = self.lastStatus.hasPrefix("Camera closed the video connection") || self.lastStatus.hasPrefix("No video received") || self.lastStatus.hasPrefix("Unrecognized camera data")
+            let retry = self.failure?.canTryAnotherProtocol == true
             if !self.receivedFrame, !self.protocols.isEmpty, retry {
                 video?.stop()
                 self.onStatus?("Classic protocol did not return video. Trying newer V720 firmware…")
                 self.beginAttempt()
-            } else { self.onStopped?() }
+            } else { self.onState?(.failed(self.failure ?? .network)); self.onStopped?() }
         }
         video.start(host: host, modern: modern)
     }
