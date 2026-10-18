@@ -14,6 +14,7 @@ struct Scenario {
 }
 let scenarios = [
     Scenario(name: "authentication rejection", modern: false, expected: "Camera rejected the request (status 403)"),
+    Scenario(name: "illegal user rejection", modern: false, expected: "Camera rejected the request (status 1)"),
     Scenario(name: "unsupported H.264", modern: true, expected: "This camera is sending H.264"),
     Scenario(name: "oversized network packet", modern: true, expected: "Unrecognized camera data"),
     Scenario(name: "peer disconnect", modern: false, expected: "Camera closed the video connection"),
@@ -56,6 +57,9 @@ final class Peer {
         case "authentication rejection":
             send(CameraWire.packet(command: 115))
             send(CameraWire.packet(command: 0, payload: Data("{\"code\":501,\"status\":403}".utf8)))
+        case "illegal user rejection":
+            send(CameraWire.packet(command: 115))
+            send(CameraWire.packet(command: 0, payload: Data("{\"code\":501,\"status\":1}".utf8)))
         case "unsupported H.264":
             send(CameraWire.packet(command: 1001, payload: Data([0, 0, 0, 1]), modern: true))
         case "oversized network packet":

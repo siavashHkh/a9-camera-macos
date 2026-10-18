@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.3 — 2026-10-18
+
+- Require fresh Bluetooth discovery, wait for disconnect before reconnecting, and preserve connection timeout messages. Cancel the connection timeout when setup becomes ready.
+- Track Bluetooth delivery, camera acknowledgement, and disconnect separately; report missing acknowledgement as unverified. Lock setup targets and fields while sending, and suppress obsolete callbacks.
+- Add classic V720 hotspot Wi-Fi provisioning (command 204, followed by restart request 299 only after acceptance). Show the target and SSID before sending and redact raw peer replies.
+- Default video to automatic classic/newer selection before a first frame, with explicit protocol choices retained. Do not retry authentication or H.264 errors. Reject illegal-user status 1.
+- Clear the default hotspot address after acknowledged/unconfirmed setup and explain home-network gateway limitations. Add scrollable setup guidance and a visible version in the title.
+- Add simulated-camera integration and AddressSanitizer regressions for setup, rejection, disconnect, timeout, cancellation, stale generations, and protocol selection.
+
+Physical-camera video and a successful home Wi-Fi association remain unverified. The app remains ad hoc signed and not Apple notarized.
+
 ## 0.3.2 — 2026-10-17
 
 - Enable App Sandbox with only outgoing networking, Bluetooth, and user-selected file access, plus Hardened Runtime.

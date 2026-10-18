@@ -1,6 +1,16 @@
 # A9 Camera validation
 
-## Current release: 0.3.2
+## Current release: 0.3.3
+
+Test date: 2026-10-18. Local host: Apple Silicon/macOS 27.0; target: arm64/macOS 26.0+.
+
+The full integration/failure and AddressSanitizer suites passed. New checks cover exact Bluetooth acknowledgement bytes, delivery versus association, disconnect/timeout ordering, obsolete attempt generations, duplicate acknowledgements and late errors; classic hotspot setup including authentication/settings rejection, fragmented duplicate replies, restart ordering, EOF without acknowledgement, timeout, oversized replies, cancellation, and immediate replacement of an invalid attempt; and automatic classic-to-newer video fallback, explicit newer selection, no retry on authentication rejection, no retry after a first frame, and Stop suppressing a retry. Illegal-user status 1 is now rejected and tested. All network fixtures bind only `127.0.0.1:6123` and use fictitious credentials. These checks do not test the CoreBluetooth radio/delegate stack.
+
+The 0.3.3 app opened locally with automatic protocol selection and both provisioning choices. Automatic mode displayed the synthetic localhost 2×2 blue JPEG; Stop restored the stopped controls, and the synthetic image was cleared before returning to hardware setup. No physical camera image was received. The Home Wi-Fi panel scrolls when guidance exceeds its height, and Bluetooth controls are disabled when hotspot setup is selected. See the release validation report for final package/CI evidence.
+
+Hardware observations during earlier 0.3.2 troubleshooting established nearby A9 advertisements and a connection to its expected Bluetooth service. Setup did not produce a verified Wi-Fi association. These observations do not establish that 0.3.3 provisions or streams successfully on physical hardware. No router settings, Wi-Fi credentials, device identifiers or full research archives are included in this public report.
+
+## Historical release: 0.3.2
 
 The full integration/failure suite passed again after security hardening on Apple Silicon/macOS 27.0. Additional AddressSanitizer checks passed for valid/invalid image decoding, dimension and pixel limits, a 100,000-frame flood, credential validation/escaping and response redaction, 20,000 deterministic malformed-input iterations, and cancellation of a queued frame while the UI is busy. Package-verifier regressions also reject checksum changes, duplicate entries, traversal, absolute paths, symlinks, unexpected files, expansion limits, and excess entry counts under Python optimization.
 

@@ -17,21 +17,22 @@ extension AppDelegate {
             button(NSButton(title: "I joined camera Wi-Fi — connect", target: nil, action: nil), #selector(connectHotspotVideo)),
             NSBox.separator(),
             label("Already on your home network?", size: 13, bold: true),
-            label("Enter the camera’s local IP on the right and click Start video.", size: 12, secondary: true),
+            label("Use its router-assigned IP on the right. Some firmware needs an additional local gateway for home-network video.", size: 12, secondary: true),
             button(NSButton(title: "Return to home Wi-Fi…", target: nil, action: nil), #selector(openWiFiSettings)),
             label("The camera hotspot may interrupt internet. Use the Mac’s Wi-Fi picker to rejoin your home network afterward.", size: 11, secondary: true)
         ], spacing: 10)
         let bluetoothActions = stack([button(scanButton, #selector(scan)), button(connectButton, #selector(connectBluetooth))], vertical: false, spacing: 6)
         let home = stack([
             label("Give the camera your Wi-Fi details", size: 15, bold: true),
-            label("Connect A9 over Bluetooth, then type your 2.4 GHz network name and password. Location access is not required.", size: 12, secondary: true),
+            label("Use Bluetooth, or join the camera hotspot for classic V720 setup. Enter a 2.4 GHz network name and password.", size: 12, secondary: true),
+            setupTransport,
             deviceMenu, bluetoothActions, bluetoothStatus,
             NSBox.separator(), label("Home Wi-Fi name (SSID)", size: 12, bold: true),
             ssid, password, button(setupButton, #selector(sendSetup)),
-            label("Details are sent directly to the camera over Bluetooth. The app does not save passwords.", size: 11, secondary: true),
+            label("Camera Wi-Fi method: join the camera hotspot first and use its IP on the right. Details go directly to the camera; passwords are not saved.", size: 11, secondary: true),
             NSBox.separator(),
             label("After setup", size: 13, bold: true),
-            label("Keep the Mac on your home network. Enter the camera’s IP from your router on the right, then Start video.", size: 12, secondary: true),
+            label("Rejoin home Wi-Fi and verify the camera in your router. An acknowledgement confirms settings were accepted, not that the camera joined. Some firmware needs a separate local gateway for video.", size: 12, secondary: true),
             label("Account-free setup is experimental. Firmware may require vendor registration and may contact the vendor once online.", size: 11, secondary: true)
         ], spacing: 10)
         let tabs = NSTabView()
@@ -39,23 +40,30 @@ extension AppDelegate {
         tabs.font = .systemFont(ofSize: 12)
         for (name, content) in [("Camera Wi-Fi", hotspot), ("Home Wi-Fi setup", home)] {
             let item = NSTabViewItem(identifier: name); item.label = name
-            let container = NSView()
+            let container = FlippedView()
+            let scroll = NSScrollView()
+            scroll.hasVerticalScroller = true; scroll.drawsBackground = false
+            scroll.documentView = container
+            container.translatesAutoresizingMaskIntoConstraints = false
+            container.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor).isActive = true
             container.addSubview(content); content.translatesAutoresizingMaskIntoConstraints = false
             for view in content.arrangedSubviews { fullWidth(view, in: content) }
             NSLayoutConstraint.activate([
                 content.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 14),
                 content.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -14),
                 content.topAnchor.constraint(equalTo: container.topAnchor, constant: 14),
-                content.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -14)
+                content.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -14)
             ])
-            item.view = container; tabs.addTabViewItem(item)
+            item.view = scroll; tabs.addTabViewItem(item)
         }
         tabs.widthAnchor.constraint(equalToConstant: 340).isActive = true
         tabs.heightAnchor.constraint(equalToConstant: 545).isActive = true
         return tabs
     }
     @objc func connectHotspotVideo() {
+        guard !setupBusy else { return }
         address.stringValue = "192.168.169.1"
+        protocolMenu.selectItem(at: 0)
         startVideo()
     }
     @objc func openWiFiSettings() {
@@ -65,3 +73,5 @@ extension AppDelegate {
         }
     }
 }
+
+final class FlippedView: NSView { override var isFlipped: Bool { true } }

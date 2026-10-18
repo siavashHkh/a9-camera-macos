@@ -1,4 +1,4 @@
-A9 Camera for Mac — version 0.3.2 (experimental public preview)
+A9 Camera for Mac — version 0.3.3 (experimental public preview)
 
 Requires Apple Silicon (M1 or later) and macOS 26 or later.
 This app is ad hoc signed and is not Apple notarized.
@@ -13,12 +13,21 @@ DIRECT CAMERA WI-FI
 1. Power on your camera.
 2. Use macOS Wi-Fi settings to join its hotspot (often Nax_..., A9, or V720).
 3. In Camera Wi-Fi, click I joined camera Wi-Fi — connect.
-   Default: 192.168.169.1, V720 classic, TCP port 6123.
+   Default: 192.168.169.1, Automatic (classic first), TCP port 6123.
 4. Try the other V720 protocol or a different local IP if your camera needs it.
 5. Save snapshot saves the current JPEG; Stop ends the stream.
 
 The Wi-Fi buttons open settings. They do not join a network automatically.
 Joining the camera hotspot may interrupt internet access on the Mac.
+
+HOME WI-FI SETUP
+Choose Bluetooth, scan for a live camera and connect; or choose Camera Wi-Fi
+(classic V720), join the camera hotspot manually, and enter its IP on the right.
+Enter the 2.4 GHz SSID/password and check the recipient before sending.
+Acceptance of settings does not verify a successful network join. A disconnect
+without acknowledgement is unconfirmed. Check the router before resending.
+Rejoin home Wi-Fi afterward; some firmware requires a separate local gateway
+for video even if the camera has a router IP. The app does not provide it.
 
 TEST STATUS
 Packet parsing, both MJPEG handshakes, failure handling, timeout, cancellation,

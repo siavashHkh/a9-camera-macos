@@ -165,7 +165,7 @@ final class CameraVideo {
                 pendingJPEG = frame
             }
         } else if modern && cmd == 1001 {
-            fail("This camera is sending H.264. This first build supports MJPEG; its video decoder needs extending.")
+            fail("This camera is sending H.264. This app supports MJPEG; H.264 decoding is not implemented.")
         } else if (!modern && cmd == 101) || (modern && cmd == 9) {
             send(command: modern ? 10 : 102)
         } else if !modern && cmd == 115 && stage == 1 {
@@ -174,7 +174,7 @@ final class CameraVideo {
         } else if cmd == (modern ? 8 : 0) {
             guard let object = (try? JSONSerialization.jsonObject(with: packet.payload)) as? [String: Any] else { return }
             let code = (object["code"] as? NSNumber)?.intValue ?? -1
-            if let result = (object["status"] as? NSNumber)?.intValue, result != 0 && result != 200 && result != 1 {
+            if let result = (object["status"] as? NSNumber)?.intValue, result != 0 && result != 200 {
                 fail("Camera rejected the request (status \(result)). This firmware may require authentication."); return
             }
             if modern {

@@ -1,12 +1,12 @@
 # A9 Camera for macOS
 
-A native Apple Silicon Mac viewer for some A9 / V720 cameras. It connects over the local network, displays MJPEG video, saves JPEG snapshots, and includes experimental Bluetooth Wi-Fi provisioning. The Mac app requires no vendor login or Location Services.
+A native Apple Silicon Mac viewer for some A9 / V720 cameras. It connects over the local network, displays MJPEG video, saves JPEG snapshots, and includes experimental Wi-Fi provisioning over Bluetooth or a classic V720 hotspot. The Mac app requires no vendor login or Location Services.
 
-**Version 0.3.2 is an experimental public preview with security hardening.** A9 is a name used by several different cameras; compatibility depends on hardware and firmware. Automated checks use simulated cameras. See [test results](docs/TEST-RESULTS.md) and the [security review](docs/SECURITY-REVIEW.md) for validation and remaining risks.
+**Version 0.3.3 is an experimental public preview with security hardening.** A9 is a name used by several different cameras; compatibility depends on hardware and firmware. Automated checks use simulated cameras. See [test results](docs/TEST-RESULTS.md) and the [security review](docs/SECURITY-REVIEW.md) for validation and remaining risks.
 
 ## Download and open
 
-Download `A9-Camera-0.3.2-macOS-Apple-Silicon.zip` from [Releases](https://github.com/siavashHkh/a9-camera-macos/releases). Requires an **Apple Silicon Mac and macOS 26 or later**. Intel Macs, Windows, and Linux are not supported by this build.
+Download `A9-Camera-0.3.3-macOS-Apple-Silicon.zip` from [Releases](https://github.com/siavashHkh/a9-camera-macos/releases). Requires an **Apple Silicon Mac and macOS 26 or later**. Intel Macs, Windows, and Linux are not supported by this build.
 
 Extract the ZIP and open `A9 Camera.app`. This is an **ad hoc signed development build, not Apple notarized**. macOS may block a downloaded copy; approve this specific app in System Settings → Privacy & Security only if you trust the download. Bluetooth and Local Network permissions are needed for the corresponding features.
 
@@ -20,16 +20,23 @@ shasum -a 256 -c SHA256SUMS.txt
 
 1. Power on the camera and join its Wi-Fi hotspot using macOS Wi-Fi settings. Names often resemble `Nax_…`, A9, or V720; the app does not scan Wi-Fi names.
 2. In **Camera Wi-Fi**, click **I joined camera Wi-Fi — connect**. The default camera address is `192.168.169.1`, TCP port 6123.
-3. If necessary, enter a different local IPv4 address or try the other V720 protocol.
+3. Automatic selection tries classic V720 first, then the newer protocol if the first closes, times out without video, or returns malformed framing. Authentication and H.264 errors remain visible. You can also select a protocol explicitly or enter a different local IPv4 address.
 4. Use **Save snapshot** to save the current JPEG frame. **Stop** ends the stream.
 
 Joining the camera hotspot can interrupt internet access. The Wi-Fi buttons open macOS settings; you choose the network yourself. The app accepts private, link-local, and loopback IPv4 addresses, rather than public internet addresses.
 
 ## Experimental home Wi-Fi setup
 
-Under **Home Wi-Fi setup**, scan for the camera and connect Bluetooth. Bluetooth starts only when you press Scan. Enter its 2.4 GHz network name and password, then choose **Send Wi-Fi setup** and confirm the recipient. The app sends the details directly over Bluetooth and does not persist or log the password. It remembers the last Bluetooth device locally after a connection. Unknown setup replies are redacted because a camera could echo credentials.
+Under **Home Wi-Fi setup**, choose a transport:
 
-An empty vendor user ID is sent. Some firmware may reject account-free provisioning or need additional services. Finding the camera's router IP does not guarantee that local streaming will work. This app does not implement the local server or router DNS setup described in the [related V720 protocol research](https://github.com/intx82/a9-v720).
+- **Bluetooth:** scan for a fresh camera advertisement and connect. Cached devices are not presented as live discoveries. Bluetooth starts only when you press Scan.
+- **Camera Wi-Fi (classic V720):** manually join the camera hotspot in macOS, then enter its hotspot IP on the right (usually `192.168.169.1`). This uses local command 204 and requests a restart only after settings are acknowledged. Newer firmware is not supported by this fallback.
+
+Enter the 2.4 GHz network name and password, then choose **Send Wi-Fi setup**. Check the recipient and network shown in the confirmation. Controls are locked during delivery. The app sends details directly to the selected camera, clears the visible password field after starting, and does not persist or log the password. It remembers a Bluetooth identifier locally after connecting. Unknown replies are redacted because a camera could echo credentials.
+
+A completed Bluetooth write, a camera disconnect, and acceptance of settings are different events. None establishes a successful Wi-Fi association. Missing acknowledgements stay **unverified**; check the router before resending. Rejoin home Wi-Fi yourself afterward. The app clears the default hotspot IP after an acknowledged or unconfirmed attempt so it is not mistaken for a router-assigned address.
+
+Bluetooth provisioning sends an empty vendor user ID. Some firmware may reject account-free provisioning or need additional services. Finding the camera's router IP does not guarantee that local streaming will work. This app does not implement the local server or router DNS setup described in the [related V720 protocol research](https://github.com/intx82/a9-v720).
 
 The camera protocol does not authenticate the camera's identity or encrypt the TCP video stream. Bluetooth link encryption is controlled by the peripheral and was not verified. A private IP address or matching Bluetooth name does not prove a device is trustworthy. Prefer a dedicated camera network; review the [security policy](SECURITY.md) before entering Wi-Fi credentials.
 
@@ -39,7 +46,7 @@ The app uses macOS App Sandbox and Hardened Runtime. Its entitlements allow outg
 
 JPEGs must be 8-bit images, no more than 4 MiB compressed, no more than 4096 pixels on either edge, and no more than 8,847,360 pixels in total. Decoding runs off the UI thread. Frame delivery keeps the newest frame and limits queued UI work. These limits may reject unusual camera formats.
 
-The [GitHub Actions workflow](.github/workflows/ci.yml) runs integration and AddressSanitizer checks on macOS 26, builds and verifies the sandboxed package, and scans source and ZIP with ClamAV. It runs for main-branch pushes and pull requests, and can be started manually from [Actions](https://github.com/siavashHkh/a9-camera-macos/actions/workflows/ci.yml). The [first run passed both jobs](https://github.com/siavashHkh/a9-camera-macos/actions/runs/39066601959), with zero ClamAV detections; see [CI results](docs/CI-RESULTS.md) for the tested commit and package hash. The published 0.3.2 ZIP was built and checked locally, with its exact hash recorded in the release's attached scan report. These checks do not guarantee safety or replace Apple notarization.
+The [GitHub Actions workflow](.github/workflows/ci.yml) runs integration and AddressSanitizer checks on macOS 26, builds and verifies the sandboxed package, and scans source and ZIP with ClamAV. It runs for main-branch pushes and pull requests, and can be started manually from [Actions](https://github.com/siavashHkh/a9-camera-macos/actions/workflows/ci.yml). The [first run passed both jobs](https://github.com/siavashHkh/a9-camera-macos/actions/runs/39066601959), with zero ClamAV detections; see [CI results](docs/CI-RESULTS.md) for the tested commit and package hash. Each published ZIP has a separate hash and validation report; historical CI results apply only to their recorded commit and package. These checks do not guarantee safety or replace Apple notarization.
 
 ## Limits
 
@@ -60,7 +67,7 @@ bash scripts/package.sh
 python3 scripts/verify_release.py
 ```
 
-Tests bind **only 127.0.0.1:6123**, which must be free. They validate packet framing, JPEG assembly, both handshakes, error reporting, timeout, cancellation, image limits, credential redaction, 20,000 deterministic malformed-input iterations, and suppression of stale callbacks. They do not connect to physical cameras or send Wi-Fi credentials.
+Tests bind **only 127.0.0.1:6123**, which must be free. They validate packet framing, JPEG assembly, both handshakes, error reporting (including illegal-user status 1), timeout, cancellation, image limits, credential redaction, setup delivery/acknowledgement ordering, classic hotspot provisioning, automatic protocol fallback, 20,000 deterministic malformed-input iterations, and suppression of stale callbacks. They do not connect to physical cameras or send Wi-Fi credentials.
 
 For optional GUI checks after running the tests:
 
@@ -72,6 +79,6 @@ Enter `127.0.0.1` in the app and start video. The solid blue 2×2 image is a **s
 
 ## Project and attribution
 
-This is a separate macOS project, independent of the firmware recovery repository. It packages the supplied 0.3.0 app's recovered local Swift source, with public-release cleanup in 0.3.1 and security hardening in 0.3.2. The complete source archive confirms the original Swift files match the recovered files. Its retained and originally shipped executables match outside their code-signature region. A bit-for-bit rebuild of that historical executable has not been established.
+This is a separate macOS project, independent of the firmware recovery repository. It packages the supplied 0.3.0 app's recovered local Swift source, with public-release cleanup in 0.3.1 and security hardening in 0.3.2, followed by connection/setup corrections in 0.3.3. The complete source archive confirms the original Swift files match the recovered files. Its retained and originally shipped executables match outside their code-signature region. A bit-for-bit rebuild of that historical executable has not been established.
 
 The recovered source cites [intx82/a9-v720](https://github.com/intx82/a9-v720) as protocol research. No files from that repository or its archived mobile app are bundled here. This project is not affiliated with the camera vendor or that research project. No software license has yet been specified for this repository.

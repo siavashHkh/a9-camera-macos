@@ -1,6 +1,6 @@
-# Security review — A9 Camera 0.3.2
+# Security review — A9 Camera 0.3.3
 
-Review date: 2026-10-17. This is a source review and targeted hardening effort, with adversarial-input and functional tests. It is not an independent certification or a guarantee that the app is safe.
+Review dates: 2026-10-17 and 2026-10-18. This is a source review and targeted hardening effort, with adversarial-input and functional tests. It is not an independent certification or a guarantee that the app is safe.
 
 ## Scope and provenance
 
@@ -9,6 +9,12 @@ Reviewed the production Swift source, build/packaging/test scripts, bundle permi
 No intentional shell execution, downloaded-code execution, login-item installation, browser/keychain reading, vendor cloud client, or telemetry was found in the production app source. Preferences store the camera IP, protocol choice, and last connected Bluetooth identifier. Snapshot writes use a user-selected save location. Provisioning credentials are held in memory to send to the selected camera, then the visible password field is cleared. Swift/OS memory may retain copies; secure erasure is not claimed.
 
 The third-party APKs, decompiled reference sources, and three firmware candidates in the complete research archive are not dependencies of the Swift app and are excluded from this repository and release. They were not executed, flashed, or certified malware-free.
+
+## 0.3.3 connection and setup review
+
+New hotspot setup uses the existing plaintext classic V720 protocol and the same canonical local IPv4 restriction. It does not add cloud access, entitlements, credential persistence, firmware updates or router administration. The confirmation shows the chosen recipient and SSID; fields/transport are locked during delivery. The setup socket closes after completion/cancellation, unsent payload references are cleared, raw replies are not displayed, and packet sizes remain bounded. Command 299 is requested only after command 204 is accepted. Acknowledgement of settings is explicitly distinguished from network association.
+
+Bluetooth reconnects wait for cancellation, use fresh discoveries, invalidate stale UI callbacks and connection timers, and preserve terminal setup results. A pure state model tests delivery/acknowledgement/disconnect ordering, but the CoreBluetooth delegate behavior still requires hardware validation. Automatic video selection makes at most two attempts before a frame and does not retry authentication/codec errors. Status 1 is treated as a rejection. The new network integration suite runs under AddressSanitizer with simulated peers and fictitious credentials.
 
 ## Findings and changes
 
@@ -35,8 +41,8 @@ GUI checks use a clearly identified synthetic localhost camera and verify render
 ## Remaining risks and Apple warning
 
 - V720 TCP video/control is plaintext and does not cryptographically authenticate the camera. The legacy `This is TEST token` value is a protocol placeholder, not a secret credential or secure authentication mechanism. Local peers or a compromised camera remain in the threat model. Use a dedicated, trusted camera network; avoid public/guest networks with untrusted peers.
-- The app sends Wi-Fi setup JSON over Bluetooth. It does not implement an application encryption/authentication layer, and the peripheral's Bluetooth link encryption/pairing behavior has not been verified. A matching name and service UUID can be imitated. Prefer a dedicated camera SSID rather than disclosing your primary network credentials.
-- Camera firmware may independently contact vendor services. That firmware is outside this Mac app's control. No firmware update or camera/router configuration changes were performed during this review.
+- The app sends Wi-Fi setup JSON over Bluetooth or plaintext TCP on the camera hotspot. It does not implement an application encryption/authentication layer, and the peripheral's Bluetooth link encryption/pairing behavior has not been verified. A matching name and service UUID can be imitated. Prefer a dedicated camera SSID rather than disclosing your primary network credentials.
+- Camera firmware may independently contact vendor services. That firmware is outside this Mac app's control. No firmware updates or router configuration changes were performed. Earlier hardware troubleshooting sent camera Wi-Fi setup requests; a successful association was not established.
 - An attacker can still deny service by closing connections, withholding frames, or continuously consuming the allowed processing budget. The image caps may reduce compatibility with some cameras. ImageIO and macOS remain trusted native dependencies; keep macOS updated.
 - The app is ad hoc signed. This Mac has no valid code-signing identities, so there is no Developer ID signature or Apple notarization. Gatekeeper's inability to verify this developer is expected. Runtime/sandbox signatures and checksums do not substitute for notarization. The review did not disable Gatekeeper or remove download quarantine to make the app open.
 

@@ -6,8 +6,8 @@
 <key>CFBundleDisplayName</key><string>A9 Camera</string>
 <key>CFBundleExecutable</key><string>A9Camera</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleVersion</key><string>5</string>
-<key>CFBundleShortVersionString</key><string>0.3.2</string>
+<key>CFBundleVersion</key><string>6</string>
+<key>CFBundleShortVersionString</key><string>0.3.3</string>
 <key>LSMinimumSystemVersion</key><string>26.0</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>NSBluetoothAlwaysUsageDescription</key><string>Find your A9 camera and send Wi-Fi settings directly to it.</string>

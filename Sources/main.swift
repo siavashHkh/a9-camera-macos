@@ -19,7 +19,11 @@ func stack(_ views: [NSView], vertical: Bool = true, spacing: CGFloat = 10) -> N
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow!
     var bluetooth: CameraBluetooth!
-    let video = CameraVideo()
+    let video = CameraVideoController()
+    let hotspotSetup = CameraAPSetup()
+    let setupTransport = NSPopUpButton()
+    var setupBusy = false
+    var hotspotSetupRunning = false
     var devices: [CameraDevice] = []
     let deviceMenu = NSPopUpButton()
     let ssid = NSTextField()
@@ -46,17 +50,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         makeMenu()
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 750), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        window.title = "A9 Camera"
+        window.title = "A9 Camera 0.3.3"
         window.minSize = NSSize(width: 1040, height: 750)
         window.center()
         window.contentView = buildContent()
         setupButton.isEnabled = false; connectButton.isEnabled = false
         snapshotButton.isEnabled = false; stopButton.isEnabled = false
         bluetooth = CameraBluetooth()
-        bluetooth.onStatus = { [weak self] text in self?.bluetoothStatus.stringValue = text }
+        bluetooth.onStatus = { [weak self] text in
+            guard let self = self, self.setupTransport.indexOfSelectedItem == 0 else { return }
+            self.bluetoothStatus.stringValue = text
+        }
+        bluetooth.onBusy = { [weak self] busy in
+            guard let self = self, !self.hotspotSetupRunning else { return }
+            self.setupBusy = busy; self.updateSetupControls()
+        }
         bluetooth.onReady = { [weak self] deviceID in
             self?.connectedDeviceID = deviceID
-            self?.setupButton.isEnabled = deviceID != nil
+            self?.updateSetupControls()
         }
         bluetooth.onDevices = { [weak self] list in
             guard let self = self else { return }
@@ -68,15 +79,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 $0.signal == 127 ? "\($0.name)  •  previously found" : "\($0.name)  •  \($0.signal) dBm"
             })
             if let id = selectedID, let index = list.firstIndex(where: { $0.id == id }) { self.deviceMenu.selectItem(at: index) }
-            self.connectButton.isEnabled = !list.isEmpty
+            self.updateSetupControls()
         }
-        bluetooth.onProvisioned = { [weak self] in
-            self?.videoStatus.stringValue = "Wi-Fi setup acknowledged. Enter the camera’s IP address from your router, then Start video."
+        bluetooth.onSetupFinished = { [weak self] phase in
+            if phase == .acknowledged || phase == .unconfirmed { self?.afterSetup() }
+        }
+        hotspotSetup.onStatus = { [weak self] text in self?.bluetoothStatus.stringValue = text }
+        hotspotSetup.onFinished = { [weak self] outcome in
+            guard let self = self else { return }
+            self.hotspotSetupRunning = false; self.setupBusy = false; self.updateSetupControls()
+            if outcome != .failed { self.afterSetup() }
         }
         video.onStatus = { [weak self] text in self?.videoStatus.stringValue = text }
         video.onStopped = { [weak self] in
             guard let self = self else { return }
-            self.isViewing = false; self.playButton.isEnabled = true; self.stopButton.isEnabled = false
+            self.isViewing = false; self.playButton.isEnabled = !self.setupBusy; self.stopButton.isEnabled = false
             self.dimensions.stringValue = self.lastJPEG == nil ? "NO VIDEO RECEIVED" : "LAST FRAME • CONNECTION STOPPED"
         }
         video.onFrame = { [weak self] frame in
@@ -124,8 +141,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         password.placeholderString = "Wi-Fi password"
         address.placeholderString = "Camera’s local IP address"
         deviceMenu.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        protocolMenu.addItems(withTitles: ["V720 classic", "V720 newer firmware"])
-        protocolMenu.selectItem(at: UserDefaults.standard.integer(forKey: "protocolIndex"))
+        protocolMenu.addItems(withTitles: ["Automatic (classic, then newer)", "V720 classic", "V720 newer firmware"])
+        let savedMode = UserDefaults.standard.string(forKey: "videoProtocolMode") ?? "automatic"
+        protocolMenu.selectItem(at: savedMode == "classic" ? 1 : savedMode == "newer" ? 2 : 0)
+        setupTransport.addItems(withTitles: ["Bluetooth", "Camera Wi-Fi (classic V720)"])
+        setupTransport.target = self; setupTransport.action = #selector(setupTransportChanged)
         let left = makeConnectionTabs()
         let viewer = NSView(); viewer.wantsLayer = true
         viewer.layer?.backgroundColor = NSColor(calibratedWhite: 0.075, alpha: 1).cgColor
@@ -174,40 +194,81 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard devices.indices.contains(index) else { return }
         bluetooth.connect(id: devices[index].id)
     }
+    func updateSetupControls() {
+        let useBluetooth = setupTransport.indexOfSelectedItem == 0
+        scanButton.isEnabled = !setupBusy && useBluetooth
+        connectButton.isEnabled = !setupBusy && useBluetooth && !devices.isEmpty
+        deviceMenu.isEnabled = !setupBusy && useBluetooth
+        setupTransport.isEnabled = !setupBusy
+        ssid.isEnabled = !setupBusy; password.isEnabled = !setupBusy
+        address.isEnabled = !setupBusy; protocolMenu.isEnabled = !setupBusy
+        setupButton.isEnabled = !setupBusy && (!useBluetooth || connectedDeviceID != nil)
+        playButton.isEnabled = !setupBusy && !isViewing
+    }
+    @objc func setupTransportChanged() {
+        guard !setupBusy else { return }
+        bluetoothStatus.stringValue = setupTransport.indexOfSelectedItem == 0
+            ? "Scan for a live camera signal, then connect Bluetooth."
+            : "Join the camera’s Wi-Fi in macOS first. Enter its hotspot IP on the right (usually 192.168.169.1). This method requires classic V720 firmware."
+        updateSetupControls()
+    }
+    func afterSetup() {
+        if address.stringValue == "192.168.169.1" {
+            address.stringValue = ""
+            UserDefaults.standard.removeObject(forKey: "cameraAddress")
+        }
+        videoStatus.stringValue = "Rejoin home Wi-Fi and check your router for the camera. Its network join is unverified. Some firmware needs a separate local gateway for video; an IP alone may not work."
+    }
     @objc func sendSetup() {
+        guard !setupBusy else { return }
         let network = ssid.stringValue
         let secret = password.stringValue
         do { _ = try CameraSetup.payload(ssid: network, password: secret) }
         catch CameraSetup.ValidationError.ssid { bluetoothStatus.stringValue = "Enter a Wi-Fi name of 1–32 bytes."; return }
         catch { bluetoothStatus.stringValue = "Use an 8–63 byte Wi-Fi password, a 64-digit hex key, or leave blank for an open network."; return }
-        guard let deviceID = connectedDeviceID else { bluetoothStatus.stringValue = "Connect Bluetooth first."; return }
+        let useBluetooth = setupTransport.indexOfSelectedItem == 0
+        let deviceID = connectedDeviceID
+        let host = address.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if useBluetooth && deviceID == nil { bluetoothStatus.stringValue = "Connect Bluetooth first."; return }
+        if !useBluetooth && !CameraVideo.validLocalAddress(host) {
+            bluetoothStatus.stringValue = "Join the camera hotspot and enter its local IPv4 address on the right."; return
+        }
+        let recipient = useBluetooth ? (devices.first { $0.id == deviceID }?.name ?? "connected Bluetooth camera") : host
         let alert = NSAlert()
         alert.messageText = "Send Wi-Fi details to this camera?"
-        alert.informativeText = "Only continue if you recognize the connected camera. This setup protocol cannot verify its identity. A dedicated camera network limits access to your other devices."
+        alert.informativeText = "Network: \(network)\nRecipient: \(recipient) via \(useBluetooth ? "Bluetooth" : "camera Wi-Fi")\n\nContinue only if you recognize this camera. Its identity cannot be verified by this protocol. The camera may restart."
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Send Wi-Fi details")
+        alert.addButton(withTitle: "Cancel"); alert.addButton(withTitle: "Send Wi-Fi details")
         guard alert.runModal() == .alertSecondButtonReturn else { return }
-        guard connectedDeviceID == deviceID else {
-            bluetoothStatus.stringValue = "The connected camera changed. Reconnect and try again."; return
+        guard !setupBusy, setupTransport.indexOfSelectedItem == (useBluetooth ? 0 : 1),
+              !useBluetooth || connectedDeviceID == deviceID else {
+            bluetoothStatus.stringValue = "The setup target changed. Reconnect and try again."; return
         }
-        bluetooth.configureWiFi(ssid: network, password: secret, expectedDeviceID: deviceID)
+        stopVideo(); setupBusy = true; updateSetupControls()
+        if useBluetooth, let id = deviceID {
+            bluetooth.configureWiFi(ssid: network, password: secret, expectedDeviceID: id)
+        } else {
+            hotspotSetupRunning = true; bluetooth.disconnect()
+            hotspotSetup.start(host: host, ssid: network, password: secret)
+        }
         password.stringValue = ""
     }
     @objc func startVideo() {
+        guard !setupBusy else { return }
         let host = address.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard CameraVideo.validLocalAddress(host) else { videoStatus.stringValue = "Enter a local IPv4 camera address."; return }
         UserDefaults.standard.set(host, forKey: "cameraAddress")
-        UserDefaults.standard.set(protocolMenu.indexOfSelectedItem, forKey: "protocolIndex")
+        let mode: CameraVideoController.Mode = protocolMenu.indexOfSelectedItem == 1 ? .classic : protocolMenu.indexOfSelectedItem == 2 ? .newer : .automatic
+        UserDefaults.standard.set(mode.rawValue, forKey: "videoProtocolMode")
         frameCount = 0; isViewing = true; lastJPEG = nil; imageView.image = nil
         placeholder.isHidden = false; snapshotButton.isEnabled = false
         playButton.isEnabled = false; stopButton.isEnabled = true
         dimensions.stringValue = "CONNECTING"
-        video.start(host: host, modern: protocolMenu.indexOfSelectedItem == 1)
+        video.start(host: host, mode: mode)
     }
     @objc func stopVideo() {
         video.stop(); isViewing = false
-        playButton.isEnabled = true; stopButton.isEnabled = false
+        playButton.isEnabled = !setupBusy; stopButton.isEnabled = false
         dimensions.stringValue = lastJPEG == nil ? "VIDEO STOPPED" : "LAST FRAME • VIDEO STOPPED"
     }
     @objc func snapshot() {
@@ -221,7 +282,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
-    func applicationWillTerminate(_ notification: Notification) { bluetooth.disconnect(); video.stop() }
+    func applicationWillTerminate(_ notification: Notification) { bluetooth.disconnect(); hotspotSetup.cancel(); video.stop() }
 }
 extension NSBox {
     static func separator() -> NSBox { let box = NSBox(); box.boxType = .separator; return box }

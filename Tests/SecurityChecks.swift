@@ -80,3 +80,28 @@ for _ in 0..<20_000 {
     check(imageParser.buffer.count <= CameraWire.maxPayload, "JPEG buffer limit bypass")
 }
 print("PASS: 20,000 deterministic malformed-input iterations (seed 0xa9c0032026101701) under AddressSanitizer")
+
+// Delivery, acknowledgement and Wi-Fi association are distinct events.
+var attempt = CameraSetupAttempt()
+let firstAttempt = attempt.begin()
+check(attempt.wrote(success: true, generation: firstAttempt), "write completion lost")
+check(attempt.didDisconnect() && attempt.isPending, "disconnect falsely completed setup")
+check(attempt.status.contains("write completed") && attempt.status.contains("disconnected"), "delivery evidence lost")
+check(!attempt.acknowledge(Data([0, 0])) && !attempt.acknowledge(echo), "non-exact acknowledgement accepted")
+check(attempt.timeOut(generation: firstAttempt) && attempt.phase == .unconfirmed, "missing acknowledgement falsely succeeded")
+check(attempt.status.contains("unverified"), "timeout claimed a verified Wi-Fi join")
+let secondAttempt = attempt.begin()
+check(!attempt.timeOut(generation: firstAttempt) && !attempt.wrote(success: false, generation: firstAttempt), "stale attempt changed current state")
+check(attempt.acknowledge(Data([0])) && !attempt.acknowledge(Data([0])), "duplicate acknowledgement changed state")
+check(!attempt.wrote(success: false, generation: secondAttempt) && !attempt.timeOut(generation: secondAttempt), "late error overwrote acknowledgement")
+check(attempt.phase == .acknowledged && attempt.status.contains("not yet verified"), "acknowledgement claimed network association")
+let thirdAttempt = attempt.begin()
+check(attempt.wrote(success: false, generation: thirdAttempt), "write failure lost")
+check(!attempt.didDisconnect() && !attempt.timeOut(generation: thirdAttempt) && attempt.phase == .failed, "terminal write failure overwritten")
+attempt.reset()
+check(!attempt.acknowledge(Data([0])) && attempt.phase == .idle, "unsolicited acknowledgement accepted")
+let ap = try JSONSerialization.jsonObject(with: CameraSetup.hotspotPayload(ssid: "Test\"\\Network", password: "test-secret")) as! [String: Any]
+let content = ap["content"] as! [String: Any]
+check(ap["code"] as? Int == 502 && content["code"] as? Int == 204 && content["devTarget"] as? String == "deadbeef", "hotspot command layout")
+check(content["s"] as? String == "Test\"\\Network" && content["p"] as? String == "test-secret", "hotspot credential escaping")
+print("PASS: setup delivery/acknowledgement/disconnect ordering, stale generations, terminal errors, and hotspot payload")
